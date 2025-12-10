@@ -1,0 +1,113 @@
+# 📄 Quran Recitation AI Evaluation System — Client Proposal
+
+Dear Sir,
+Below is the full plan, cost, and duration for building your Qur’an Recitation Evaluation System.
+
+## 1. Project Summary
+
+I will develop an AI system that:
+
+Listens to the student's Qur’an recitation
+
+Aligns it with the Quran text (Forced Alignment)
+
+Compares it with expert Sheikh recordings
+
+Detects mistakes in:
+
+words
+
+letters
+
+harakat
+
+tajweed rules
+
+Provides written and audio feedback
+
+Allows the student to retry and improves accuracy
+
+## 2. Full Workflow
+
+Student records audio
+
+System aligns audio to text (Forced Alignment)
+
+Phoneme confidence is calculated
+
+User audio is compared with Sheikh audio (Reference Matching)
+
+Tajweed errors are detected via timing & pitch analysis
+
+Errors are detected
+
+Feedback is generated
+
+User retries
+
+System measures improvement
+
+## 3. Deliverables
+
+Forced Alignment module (Wav2Vec2)
+
+Phoneme Confidence Scoring module
+
+Reference Audio Matching module (DTW)
+
+Tajweed Analysis module (Pitch/Duration)
+
+Error classification system
+
+Feedback generator (text + TTS)
+
+Retry logic
+
+JSON API for backend
+
+Documentation
+
+Sample audio + sample JSON output
+
+## 4. Timeline
+
+| Phase              | Duration |
+| ------------------ | -------- |
+| Audio + Data Prep  | 1 week   |
+| Forced Alignment   | 2 weeks  |
+| Error Detection    | 1 week   |
+| Reference Matching | 2 weeks  |
+| Tajweed Analysis   | 2 weeks  |
+| Feedback + Retry   | 1 week   |
+| Testing + Delivery | 1 week   |
+
+Total Duration: 8 Weeks
+
+## 5. Cost (Junior Engineer Pricing)
+
+| Item               | Cost (USD) |
+| ------------------ | ---------- |
+| AI System Development | $900 |
+| Testing & QA       | $100     |
+| GPU Compute        | $50–100  |
+| Total Estimated Cost | $1,050 – $1,200 |
+
+## 6. What I Need From You
+
+Quran text database (already available)
+
+4 Sheikh audio datasets (already available)
+
+Backend endpoint for integration
+
+Deployment environment details
+
+## 7. Notes
+
+The system detects basic tajweed, not advanced scholarly fiqh rules
+
+AI-based evaluation, suitable for kids and adults
+
+Backend will be handled by your team, I provide AI only
+
+System integrates easily with mobile or web apps
