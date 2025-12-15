@@ -1,9 +1,14 @@
 fastapi
 uvicorn
 python-multipart
-torch
+torch>=2.6
+torchvision
 transformers
+safetensors
 librosa
 numpy
 scipy
 soundfile
+peft
+accelerate
+protobuf
