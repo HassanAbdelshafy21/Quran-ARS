@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 python-multipart
-torch>=2.6
+# torch>=2.6 --pre --index-url https://download.pytorch.org/whl/nightly/cu126
 torchvision
 transformers
 safetensors
@@ -12,3 +12,8 @@ soundfile
 peft
 accelerate
 protobuf
+datasets
+bitsandbytes
+requests
+torchaudio
+tensorboard
