@@ -66,6 +66,7 @@ def prepare_dataset(batch, processor):
     import librosa
     
     # Iterate over the batch
+    # print(f"Processing batch of size {len(batch['audio'])}")
     for i in range(len(batch["audio"])):
         audio_path = batch["audio"][i]
         text = batch["text"][i]
@@ -80,8 +81,12 @@ def prepare_dataset(batch, processor):
             # compute log-Mel input features from input audio array 
             features = processor.feature_extractor(audio_array, sampling_rate=sampling_rate).input_features[0]
             
-            # encode target text to label ids 
+            # encoded target text to label ids 
             lab = processor.tokenizer(text).input_ids
+
+            if len(lab) > 448:
+                print(f"Skipping {audio_path}: Labels too long ({len(lab)} > 448)")
+                continue
             
             # Add to new batch
             new_batch["audio"].append(audio_path)
@@ -116,20 +121,27 @@ def train():
         batched=True, 
         batch_size=32,
         num_proc=1,
-        remove_columns=dataset.column_names # Remove old columns to avoid mismatch length
+        remove_columns=dataset.column_names, # Remove old columns to avoid mismatch length
+        load_from_cache_file=False
     )
+    print(f"Mapped dataset columns: {dataset.column_names}")
+    if len(dataset) > 0:
+        print(f"First item keys: {dataset[0].keys()}")
 
     print(f"Loading model {BASE_MODEL}...")
     # Load in 8bit or 4bit if bitsandbytes is available, else fp32 or fp16
     # For now assume we want to setup for LoRA
     model = WhisperForConditionalGeneration.from_pretrained(
         BASE_MODEL, 
-        load_in_8bit=True, 
+        torch_dtype=torch.float16,
         device_map="auto"
     )
     
-    # Prepare for k-bit training
-    model = prepare_model_for_kbit_training(model)
+    # Prepare for k-bit training - SKIPPED for FP16 compatibility
+    # model = prepare_model_for_kbit_training(model)
+    # However, for gradient checkpointing to work, we need this:
+    model.enable_input_require_grads()
+    model.config.use_cache = False
 
     # Apply LoRA
     # We can either load existing adapter or start new
@@ -181,7 +193,7 @@ def train():
         logging_steps=50,
         report_to="none",
         load_best_model_at_end=True,
-        metric_for_best_model="wer",
+        metric_for_best_model="eval_loss",
         greater_is_better=False,
         push_to_hub=False,
     )
@@ -195,8 +207,17 @@ def train():
         processing_class=processor.feature_extractor,
     )
 
+    
+    # Check for existing checkpoints
+    last_checkpoint = None
+    if os.path.isdir("finetuning/checkpoints"):
+        checkpoints = [d for d in os.listdir("finetuning/checkpoints") if d.startswith("checkpoint")]
+        if checkpoints:
+            last_checkpoint = True # Trainer will find the latest
+            print("Found existing checkpoints. Resuming training...")
+
     print("Starting training...")
-    trainer.train() 
+    trainer.train(resume_from_checkpoint=last_checkpoint)
     # Commented out to prevent auto-run
 
 if __name__ == "__main__":

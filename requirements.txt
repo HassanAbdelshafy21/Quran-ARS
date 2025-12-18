@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 python-multipart
-# torch>=2.6 --pre --index-url https://download.pytorch.org/whl/nightly/cu126
+# torch>=2.8 --pre --index-url https://download.pytorch.org/whl/nightly/cu128
 torchvision
 transformers
 safetensors
@@ -17,3 +17,4 @@ bitsandbytes
 requests
 torchaudio
 tensorboard
+jiwer
