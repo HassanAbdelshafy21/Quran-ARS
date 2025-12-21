@@ -60,43 +60,70 @@ def prepare_dataset(batch, processor):
         "ayah": [],
         "id": [],
         "input_features": [],
-        "labels": []
+        "labels": [],
+        "reciter": []
     }
     
     import librosa
     
     # Iterate over the batch
-    # print(f"Processing batch of size {len(batch['audio'])}")
     for i in range(len(batch["audio"])):
         audio_path = batch["audio"][i]
         text = batch["text"][i]
         surah = batch["surah"][i]
         ayah = batch["ayah"][i]
         id_val = batch["id"][i]
+        reciter = batch["reciter"][i]
         
         try:
-            # Load and resample to 16kHz
-            audio_array, sampling_rate = librosa.load(audio_path, sr=16000)
+            # OPTIMIZATION: Check Duration from Path first (Fast)
+            # This avoids loading/resampling audio for the 17k files we will skip
+            duration = librosa.get_duration(path=audio_path)
             
-            # compute log-Mel input features from input audio array 
-            features = processor.feature_extractor(audio_array, sampling_rate=sampling_rate).input_features[0]
-            
-            # encoded target text to label ids 
-            lab = processor.tokenizer(text).input_ids
-
-            if len(lab) > 448:
-                print(f"Skipping {audio_path}: Labels too long ({len(lab)} > 448)")
+            # LOGIC: Train on ALL files < 30s
+            if duration > 30.0:
+                # Skip > 30s
                 continue
             
-            # Add to new batch
-            new_batch["audio"].append(audio_path)
-            new_batch["text"].append(text)
-            new_batch["surah"].append(surah)
-            new_batch["ayah"].append(ayah)
-            new_batch["id"].append(id_val)
-            new_batch["input_features"].append(features)
-            new_batch["labels"].append(lab)
+            # Load audio -> Resample to 16kHz (Only for valid files)
+            audio_array, sampling_rate = librosa.load(audio_path, sr=16000)
             
+            # Identify if it's the Child reciter
+            is_child = "Minshawy_Teacher" in str(reciter)
+            
+            # We will add Original to ALL files < 30s
+            items_to_add = [(audio_array, "original")]
+
+            import random
+            import numpy as np
+            
+            # Augment ONLY Adult reciters (to avoid chipmunking the child further)
+            if not is_child:
+                try:
+                    # Force Augmentation (Pitch Shift)
+                    n_steps = random.uniform(2.0, 4.0) 
+                    augmented_audio = librosa.effects.pitch_shift(audio_array, sr=sampling_rate, n_steps=n_steps)
+                    items_to_add.append((augmented_audio, "augmented"))
+                except Exception as aug_err:
+                    print(f"Augmentation failed for {audio_path}: {aug_err}")
+
+            # Add to batch
+            for audio_data, kind in items_to_add:
+                features = processor.feature_extractor(audio_data, sampling_rate=sampling_rate).input_features[0]
+                lab = processor.tokenizer(text).input_ids
+
+                if len(lab) > 448:
+                    continue
+                
+                new_batch["audio"].append(audio_path)
+                new_batch["text"].append(text)
+                new_batch["surah"].append(surah)
+                new_batch["ayah"].append(ayah)
+                new_batch["id"].append(f"{id_val}_{kind}")
+                new_batch["input_features"].append(features)
+                new_batch["labels"].append(lab)
+                new_batch["reciter"].append(reciter)
+
         except Exception as e:
             print(f"Skipping bad file {audio_path}: {e}")
             continue
@@ -104,9 +131,18 @@ def prepare_dataset(batch, processor):
     return new_batch
 
 def train():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max_steps", type=int, default=50000)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--output_dir", type=str, default=OUTPUT_DIR)
+    parser.add_argument("--max_samples", type=int, default=None, help="Limit dataset size for debugging")
+    args, _ = parser.parse_known_args()
+
     print(f"Loading processor for {BASE_MODEL}...")
     processor = WhisperProcessor.from_pretrained(BASE_MODEL)
-    
+
     print(f"Loading dataset from {DATASET_PATH}...")
     try:
         dataset = load_from_disk(DATASET_PATH)
@@ -114,19 +150,51 @@ def train():
         print(f"Could not load dataset: {e}")
         return
 
+    print(f"Initial Dataset Size: {len(dataset)}")
+    
+    # Optional slicing for debug
+    if args.max_samples is not None and args.max_samples < len(dataset):
+        print(f"Slicing dataset to {args.max_samples} samples for debugging...")
+        dataset = dataset.select(range(args.max_samples))
+
+    # Simple check for full dataset
+    if len(dataset) < 100 and args.max_samples is None:
+        print("WARNING: Dataset seems very small. Are you sure this is correct?")
+
     print("Preprocessing dataset...")
-    # Use batched=True to allow filtering out bad examples
+    # Map dataset first
     dataset = dataset.map(
         lambda x: prepare_dataset(x, processor), 
         batched=True, 
         batch_size=32,
-        num_proc=1,
-        remove_columns=dataset.column_names, # Remove old columns to avoid mismatch length
+        remove_columns=dataset.column_names, 
         load_from_cache_file=False
     )
-    print(f"Mapped dataset columns: {dataset.column_names}")
-    if len(dataset) > 0:
-        print(f"First item keys: {dataset[0].keys()}")
+    
+    # Filter out any None/Empty entries if prepare_dataset failed (it currently just skips internally but returns lists, 
+    # but HF map expects consistent lengths. prepare_dataset returns dict of lists. 
+    # If we skipped items, lists might be shorter than batch? 
+    # Actually, prepare_dataset in this code iterates batch and appends valid ones. 
+    # HF `map` with `batched=True` expects the function to return a dict of lists with the *same* length as input batch 
+    # OR a new length if it's a 1-to-many or filter operation. 
+    # Since we are constructing a NEW batch from scratch in `prepare_dataset`, 
+    # and we pass `remove_columns`, this effectively replaces the dataset.
+    # So the length change is handled by HF.
+    
+    print(f"Processed Dataset Size: {len(dataset)}")
+
+    # Create Train/Test Split
+    test_size = 0.05
+    if len(dataset) < 20: 
+        test_size = 0.2 # larger split for tiny debug sets
+        
+    print(f"Splitting dataset into Train (?) and Test ({test_size})...")
+    split_dataset = dataset.train_test_split(test_size=test_size, seed=42)
+    train_dataset = split_dataset["train"]
+    eval_dataset = split_dataset["test"]
+    
+    print(f"Train Size: {len(train_dataset)}")
+    print(f"Eval Size: {len(eval_dataset)}")
 
     print(f"Loading model {BASE_MODEL}...")
     # Load in 8bit or 4bit if bitsandbytes is available, else fp32 or fp16
@@ -176,23 +244,23 @@ def train():
     data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
     training_args = Seq2SeqTrainingArguments(
-        output_dir=OUTPUT_DIR,
-        per_device_train_batch_size=8,
-        gradient_accumulation_steps=1,
+        output_dir=args.output_dir,
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=1e-5,
-        warmup_steps=500,
-        num_train_epochs=10,
+        warmup_steps=500 if args.max_steps > 500 else 0,
+        max_steps=args.max_steps,
         gradient_checkpointing=True,
         fp16=True,
         eval_strategy="steps",
-        per_device_eval_batch_size=8,
+        per_device_eval_batch_size=args.batch_size,
         predict_with_generate=True,
         generation_max_length=225,
-        save_steps=1000,
-        eval_steps=1000,
-        logging_steps=50,
+        save_steps=1000 if args.max_steps > 1000 else 10,
+        eval_steps=1000 if args.max_steps > 1000 else 10,
+        logging_steps=50 if args.max_steps > 50 else 1,
         report_to="none",
-        load_best_model_at_end=True,
+        load_best_model_at_end=True if args.max_steps > 100 else False,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         push_to_hub=False,
@@ -201,24 +269,24 @@ def train():
     trainer = Seq2SeqTrainer(
         args=training_args,
         model=model,
-        train_dataset=dataset,
-        eval_dataset=dataset, # Should split train/test
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset, 
         data_collator=data_collator,
         processing_class=processor.feature_extractor,
     )
 
     
+    
     # Check for existing checkpoints
     last_checkpoint = None
-    if os.path.isdir("finetuning/checkpoints"):
-        checkpoints = [d for d in os.listdir("finetuning/checkpoints") if d.startswith("checkpoint")]
+    if os.path.exists(args.output_dir): 
+        checkpoints = [d for d in os.listdir(args.output_dir) if d.startswith("checkpoint")]
         if checkpoints:
-            last_checkpoint = True # Trainer will find the latest
+            last_checkpoint = True 
             print("Found existing checkpoints. Resuming training...")
 
     print("Starting training...")
     trainer.train(resume_from_checkpoint=last_checkpoint)
-    # Commented out to prevent auto-run
-
+    
 if __name__ == "__main__":
     train()

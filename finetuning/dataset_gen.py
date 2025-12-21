@@ -13,8 +13,8 @@ class QuranDatasetGenerator:
     def __init__(self, output_dir="data/dataset_cache", reciters=None):
         self.output_dir = output_dir
         self.audio_base_dir = os.path.join(output_dir, "audio")
-        # Default to correct identifiers for: Husary (Hafs), Abdul Basit (Murattal), Minshawy (Murattal)
-        self.reciters = reciters or ["Husary_128kbps", "Abdul_Basit_Murattal_192kbps", "Minshawy_Murattal_128kbps"]
+        # Default to correct identifiers for: Husary (Hafs), Abdul Basit (Murattal), Minshawy (Murattal), Minshawi (Muallim/Child)
+        self.reciters = reciters or ["Husary_128kbps", "Abdul_Basit_Murattal_192kbps", "Minshawy_Murattal_128kbps", "Minshawy_Teacher_128kbps"]
         self.db = QuranDB()
         os.makedirs(self.audio_base_dir, exist_ok=True)
 
@@ -24,6 +24,12 @@ class QuranDatasetGenerator:
         os.makedirs(reciter_dir, exist_ok=True)
         
         file_name = f"{sura_no:03d}{aya_no:03d}.mp3"
+        if reciter == "Minshawy_Teacher_128kbps":
+             # Use locally processed files if available
+             local_processed_path = os.path.join(self.output_dir, "audio", "Minshawy_Child_Only", file_name)
+             if os.path.exists(local_processed_path):
+                 return local_processed_path
+        
         url = f"https://everyayah.com/data/{reciter}/{file_name}"
         path = os.path.join(reciter_dir, file_name)
         
@@ -42,43 +48,44 @@ class QuranDatasetGenerator:
                 return None
         return path
 
-    def create_dataset(self, ayahs_to_fetch=None, full_quran=False):
-        """Creates a HF dataset with multiple reciters."""
-        if full_quran:
-            print("Generating FULL Quran dataset for all reciters...")
-            ayahs_to_fetch = []
-            for s in range(1, 115):
-                for a in range(1, 300):
-                    if self.db.get_ayah(s, a):
-                        ayahs_to_fetch.append((s, a))
-                    else:
-                        break
-        elif not ayahs_to_fetch:
-            print("No ayahs specified. Defaulting to Al-Fatiha.")
-            ayahs_to_fetch = [(1, i) for i in range(1, 8)]
-
+    def create_dataset(self):
+        """Creates a HF dataset with multiple reciters, handling specific ranges for each."""
+        from tqdm import tqdm
+        
         data = []
-        print(f"Processing {len(ayahs_to_fetch)} ayahs for {len(self.reciters)} reciters...")
-        
-        for sura, aya in ayahs_to_fetch:
-            # Get text once (same for all reciters)
-            ayah_obj = self.db.get_ayah(sura, aya)
-            if not ayah_obj:
-                continue
-            text = ayah_obj.aya_text
+        FULL_QURAN_SURAHS = list(range(1, 115))
+        JUZ_AMMA_AND_FATIHA = [1] + list(range(78, 115))
 
-            for reciter in self.reciters:
-                audio_path = self.download_ayah_audio(sura, aya, reciter)
-                if audio_path:
-                    data.append({
-                        "audio": audio_path,
-                        "text": text,
-                        "surah": sura,
-                        "ayah": aya,
-                        "reciter": reciter,
-                        "id": f"{reciter}_{sura}_{aya}"
-                    })
-        
+        for reciter in self.reciters:
+            print(f"Processing {reciter}...")
+            
+            if reciter == "Minshawy_Teacher_128kbps":
+                target_surahs = JUZ_AMMA_AND_FATIHA
+                print(f"  - Logic: Juz Amma + Fatiha")
+            else:
+                target_surahs = FULL_QURAN_SURAHS
+                print(f"  - Logic: Full Quran")
+            
+            for s in tqdm(target_surahs, desc=f"Surahs for {reciter}"):
+                 # Iterate ayahs until we hit the limit for the surah
+                 for a in range(1, 300):
+                     ayah_obj = self.db.get_ayah(s, a)
+                     if not ayah_obj:
+                         break
+                     
+                     text = ayah_obj.aya_text
+                     audio_path = self.download_ayah_audio(s, a, reciter)
+                     
+                     if audio_path:
+                        data.append({
+                            "audio": audio_path,
+                            "text": text,
+                            "surah": s,
+                            "ayah": a,
+                            "reciter": reciter,
+                            "id": f"{reciter}_{s}_{a}"
+                        })
+
         if not data:
             print("No data collected.")
             return None
@@ -88,9 +95,27 @@ class QuranDatasetGenerator:
 
 if __name__ == "__main__":
     gen = QuranDatasetGenerator()
+    ds = gen.create_dataset()
     
-    is_full = "--full" in sys.argv
-    ds = gen.create_dataset(full_quran=is_full)
+    if ds:
+        print(ds)
+        ds.save_to_disk(os.path.join(gen.output_dir, "quran_dataset"))
+        print(f"Saving dataset to {os.path.join(gen.output_dir, 'quran_dataset')}...")
+        print("Done.")
+    else:
+        # Default to Juz Amma + Fatiha (what we scraped)
+        target_surahs = [1] + list(range(78, 115))
+        ayahs_to_fetch = []
+        print("Generating dataset for Juz Amma (Surahs 78-114 + 1)...")
+        for s in target_surahs:
+            # We don't know exact ayah count easily without DB, but DB calls are cheap
+            # Loop a safe amount
+             for a in range(1, 300):
+                    if gen.db.get_ayah(s, a):
+                        ayahs_to_fetch.append((s, a))
+                    else:
+                        break
+        ds = gen.create_dataset(ayahs_to_fetch=ayahs_to_fetch)
     
     if ds:
         print(ds)
