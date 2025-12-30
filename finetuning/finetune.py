@@ -3,13 +3,13 @@ import os
 import torch
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
-from datasets import load_from_disk
+from datasets import load_from_disk, Value
 from transformers import (
     WhisperForConditionalGeneration,
     WhisperProcessor,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
-    Seq2SeqTrainer
+    EarlyStoppingCallback
 )
 from peft import PeftModel, LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
 
@@ -20,8 +20,8 @@ print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
 BASE_MODEL = "tarteel-ai/whisper-base-ar-quran"
 ADAPTER_MODEL = "KheemP/whisper-base-quran-lora"
-DATASET_PATH = "data/quran_dataset"
-OUTPUT_DIR = "finetuning/checkpoints"
+DATASET_PATH = "data/quran_dataset_v5"
+OUTPUT_DIR = "finetuning/checkpoints_v5"
 
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:
@@ -48,7 +48,11 @@ class DataCollatorSpeechSeq2SeqWithPadding:
             labels = labels[:, 1:]
 
         batch["labels"] = labels
-
+        
+        # HOTFIX: Ensure 'input_ids' is NOT passed to Whisper
+        if "input_ids" in batch:
+            del batch["input_ids"]
+            
         return batch
 
 def prepare_dataset(batch, processor):
@@ -70,10 +74,14 @@ def prepare_dataset(batch, processor):
     for i in range(len(batch["audio"])):
         audio_path = batch["audio"][i]
         text = batch["text"][i]
-        surah = batch["surah"][i]
-        ayah = batch["ayah"][i]
-        id_val = batch["id"][i]
-        reciter = batch["reciter"][i]
+        try:
+            surah = batch.get("surah", [None]*len(batch["audio"]))[i]
+            ayah = batch.get("ayah", [None]*len(batch["audio"]))[i]
+        except:
+            surah, ayah = None, None
+
+        id_val = batch["id"][i] if "id" in batch else f"id_{i}"
+        reciter = batch["reciter"][i] if "reciter" in batch else "Unknown"
         
         try:
             # OPTIMIZATION: Check Duration from Path first (Fast)
@@ -130,6 +138,11 @@ def prepare_dataset(batch, processor):
             
     return new_batch
 
+
+
+
+
+
 def train():
     import argparse
     parser = argparse.ArgumentParser()
@@ -168,7 +181,8 @@ def train():
         batched=True, 
         batch_size=32,
         remove_columns=dataset.column_names, 
-        load_from_cache_file=False
+        load_from_cache_file=False,
+        num_proc=8
     )
     
     # Filter out any None/Empty entries if prepare_dataset failed (it currently just skips internally but returns lists, 
@@ -222,22 +236,18 @@ def train():
     # However, PeftModel.from_pretrained puts it in inference mode usually. 
     # We need to set is_trainable=True.
     
-    print(f"Loading adapter {ADAPTER_MODEL}...")
-    try:
-        model = PeftModel.from_pretrained(model, ADAPTER_MODEL, is_trainable=True)
-        print("Loaded existing adapter.")
-    except Exception as e:
-        print(f"Could not load adapter (might not exist locally or on hub?): {e}")
-        print("Initializing new LoRA config...")
-        config = LoraConfig(
-            r=32, 
-            lora_alpha=64, 
-            target_modules=["q_proj", "v_proj"], 
-            lora_dropout=0.05, 
-            bias="none", 
-            task_type=TaskType.SEQ_2_SEQ_LM
-        )
-        model = get_peft_model(model, config)
+    # Apply LoRA
+    # V4: Fresh Start from Base Model
+    print("Initializing new LoRA config...")
+    config = LoraConfig(
+        r=32, 
+        lora_alpha=64, 
+        target_modules=["q_proj", "v_proj"], 
+        lora_dropout=0.05, 
+        bias="none",
+        # task_type=TaskType.SEQ_2_SEQ_LM # <-- PROBABLE CAUSE OF INPUT_IDS ERROR
+    )
+    model = get_peft_model(model, config)
 
     model.print_trainable_parameters()
 
@@ -273,6 +283,7 @@ def train():
         eval_dataset=eval_dataset, 
         data_collator=data_collator,
         processing_class=processor.feature_extractor,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=5)],
     )
 
     

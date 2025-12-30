@@ -53,6 +53,33 @@ class QuranDatasetGenerator:
         from tqdm import tqdm
         
         data = []
+        
+        # --- Ingest V3 Normalized Data (Priority 1) ---
+        # --- Ingest V3 Normalized Data (Priority 1) ---
+        import json
+        NORMALIZED_METADATA = "data/cleaned_metadata.jsonl"
+        if os.path.exists(NORMALIZED_METADATA):
+            print(f"Ingesting V4 Cleaned Data from {NORMALIZED_METADATA}...")
+            with open(NORMALIZED_METADATA, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        record = json.loads(line)
+                        data.append({
+                            "audio": record['audio_path'],
+                            "text": record['text'],
+                            "surah": 0, # Not always available/relevant in mixed batches
+                            "ayah": 0,
+                            "reciter": record['reciter'],
+                            "id": os.path.basename(record['audio_path'])
+                        })
+                    except Exception as e: 
+                        print(f"Failed to load line: {e}")
+                        pass
+            print(f"Loaded {len(data)} V3 samples. Skipping legacy scraping.")
+            if data:
+                ds = Dataset.from_list(data)
+                return ds
+        
         FULL_QURAN_SURAHS = list(range(1, 115))
         JUZ_AMMA_AND_FATIHA = [1] + list(range(78, 115))
 
@@ -86,6 +113,33 @@ class QuranDatasetGenerator:
                             "id": f"{reciter}_{s}_{a}"
                         })
 
+        # --- Ingest New Kids Data (Junaid) ---
+        # Only ingest if we didn't load V3, because V3 already contains Junaid.
+        is_v3_loaded = len(data) > 15000 
+        
+        if not is_v3_loaded:
+            import json
+            KIDS_METADATA = "data/kids_metadata.jsonl"
+            if os.path.exists(KIDS_METADATA):
+                print(f"Ingesting pre-processed Kids Data from {KIDS_METADATA}...")
+                with open(KIDS_METADATA, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        try:
+                            record = json.loads(line)
+                            data.append({
+                                "audio": record['audio_path'],
+                                "text": record['text'],
+                                "surah": record['surah'],
+                                "ayah": record['ayah'],
+                                "reciter": record['reciter'],
+                                "id": f"{record['reciter']}_{record['surah']}_{record['ayah']}"
+                            })
+                        except Exception as e:
+                            print(f"Error reading kids data: {e}")
+                print(f"Total dataset size now: {len(data)}")
+            else:
+                print("No kids_metadata.jsonl found. Skipping kids data.")
+
         if not data:
             print("No data collected.")
             return None
@@ -99,8 +153,8 @@ if __name__ == "__main__":
     
     if ds:
         print(ds)
-        ds.save_to_disk(os.path.join(gen.output_dir, "quran_dataset"))
-        print(f"Saving dataset to {os.path.join(gen.output_dir, 'quran_dataset')}...")
+        ds.save_to_disk("data/quran_dataset_kids")
+        print(f"Saving dataset to data/quran_dataset_kids...")
         print("Done.")
     else:
         # Default to Juz Amma + Fatiha (what we scraped)
