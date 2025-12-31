@@ -41,9 +41,14 @@ class QuranModel:
         if self.device == "cuda":
             inputs = inputs.half()
             
-        # Generate
+        # Generate with Beam Search for better accuracy on children's speech
         with torch.no_grad():
-            generated_ids = self.model.generate(inputs, max_new_tokens=400)
+            generated_ids = self.model.generate(
+                inputs, 
+                max_new_tokens=400,
+                num_beams=5, 
+                early_stopping=True
+            )
             
         # Decode
         transcription = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]

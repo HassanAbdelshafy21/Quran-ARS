@@ -38,64 +38,61 @@ def load_resources():
     segmenter = AudioSegmenter()
     print("Backend Ready! 🚀")
 
+import uuid
+from pydantic import BaseModel
+
+# Additional Dirs
+TEMP_STORAGE = "temp_storage"
+GOLDEN_DATASET = "data/golden_negatives"
+os.makedirs(TEMP_STORAGE, exist_ok=True)
+os.makedirs(GOLDEN_DATASET, exist_ok=True)
+
+class ReportRequest(BaseModel):
+    request_id: str
+    user_comment: str
+
 @app.post("/grade_recitation")
 async def grade_recitation(
     file: UploadFile = File(...), 
     target_ayah: str = Form(...) 
 ):
     """
-    Main Endpoint: 
-    1. Receives Audio + Target Text (Ayah).
-    2. Segments Audio (VAD).
-    3. Transcribes each segment.
-    4. Joins text and Grades it.
+    Main Endpoint: Returns Grade + Request ID for reporting.
     """
     if not model:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    # 1. Save File Temporarily
-    temp_path = f"temp_{file.filename}"
-    with open(temp_path, "wb") as buffer:
+    # 1. Generate Request ID & Save to Cache
+    request_id = str(uuid.uuid4())
+    file_ext = file.filename.split('.')[-1]
+    cached_path = os.path.join(TEMP_STORAGE, f"{request_id}.{file_ext}")
+    
+    with open(cached_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
     try:
-        print(f"Processing File: {file.filename}")
+        print(f"Processing Request {request_id} ({file.filename})")
         
-        # 2. Segment Audio (To avoid broken words)
-        # For a short ayah request, we might not need heavy segmentation, 
-        # but for 15m audio we do. Let's assume this endpoint handles chunks or full recitations.
-        # If the file is huge, this call blocks. In prod, use Celery/Queue.
-        segments = segmenter.segment_file(temp_path)
-        
+        # 2. Segment & Transcribe
+        segments = segmenter.segment_file(cached_path)
         full_transcript = []
-        
-        # 3. Transcribe Segments
         for seg in segments:
-            # We already have audio data in memory if we used the segmenter correctly,
-            # but our current segmenter returns data or paths. 
-            # Let's use the 'audio_data' from segmenter directly if available
-            audio_chunk = seg['audio_data'] 
-            
-            text = model.transcribe(audio_chunk)
-            if text:
-                full_transcript.append(text)
+            text = model.transcribe(seg['audio_data'])
+            if text: full_transcript.append(text)
                 
         final_text = " ".join(full_transcript)
-        print(f"Transcript: {final_text}")
         
-        # 4. Grade
-        # Note: If valid input is 15 minutes, 'target_ayah' must be a long string of Surah.
-        # Ideally user sends "Surah ID" and we fetch text. 
-        # For now, we trust the Client sends the text.
-        
+        # 3. Grade
         result = grader.grade(final_text, target_ayah)
         
         response = {
+            "request_id": request_id, # Key for Flywheel
             "status": "success",
-            "transcription": final_text,
+            "user_recitation": final_text,
+            "expected_recitation": target_ayah,
             "passed": result['passed'],
             "accuracy": result['accuracy'],
-            "mistakes": result['mistakes'], # List of missed/wrong words
+            "mistakes": result['mistakes'],
             "segments_processed": len(segments)
         }
         
@@ -103,12 +100,47 @@ async def grade_recitation(
         
     except Exception as e:
         print(f"Error: {e}")
+        # Clean up on error only
+        if os.path.exists(cached_path): os.remove(cached_path)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/report_issue")
+async def report_issue(report: ReportRequest):
+    """
+    Data Flywheel Endpoint:
+    Moves the cached audio to 'Golden Negatives' for future training.
+    """
+    # 1. Find the file in temp storage
+    # We don't know the extension, so check likely ones or glob
+    import glob
+    search_pattern = os.path.join(TEMP_STORAGE, f"{report.request_id}.*")
+    matches = glob.glob(search_pattern)
+    
+    if not matches:
+        raise HTTPException(status_code=404, detail="Audio file not found (expired or invalid ID)")
+    
+    src_file = matches[0]
+    filename = os.path.basename(src_file)
+    dst_file = os.path.join(GOLDEN_DATASET, filename)
+    
+    # 2. Move file (or Copy to be safe)
+    shutil.copy2(src_file, dst_file)
+    
+    # 3. Save Metadata
+    meta_file = os.path.join(GOLDEN_DATASET, f"{report.request_id}.json")
+    metadata = {
+        "request_id": report.request_id,
+        "user_comment": report.user_comment,
+        "audio_file": filename,
+        "timestamp": "2025-12-31" # In prod use time.time()
+    }
+    import json
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
         
-    finally:
-        # Cleanup
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    print(f"REPORTED: Saved Golden Negative {report.request_id}")
+    
+    return {"status": "success", "message": "Thank you! This helps improve the model."}
 
 if __name__ == "__main__":
     # Dev Server

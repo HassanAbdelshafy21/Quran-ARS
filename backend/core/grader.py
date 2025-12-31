@@ -125,14 +125,14 @@ class QuranGrader:
             if op == 'equal':
                 score += 1
             elif op == 'sub':
-                feedback.append(f"Mistake: Said '{h_w}' instead of '{r_w}'")
+                feedback.append(f"خطأ: قلت '{h_w}' بدلاً من '{r_w}'")
             elif op == 'delete':
-                feedback.append(f"Missed Word: '{r_w}'")
+                feedback.append(f"كلمة ناقصة: '{r_w}'")
             elif op == 'insert':
                 # Optional: Penalize insertions? 
                 # For kids, we often forgive "stuttering" or "starting with Bismillah"
                 # But strict grading might flag it.
-                feedback.append(f"Added Word: '{h_w}'")
+                feedback.append(f"كلمة زائدة: '{h_w}'")
         
         # Avoid division by zero
         accuracy = score / total_target_words if total_target_words > 0 else 0.0

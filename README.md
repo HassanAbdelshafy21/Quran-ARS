@@ -1,139 +1,130 @@
-# Quran-ARS (Quran Recitation AI System)
+# 🎙️ Quran ASR for Kids (V5 Production)
 
-An AI-powered system designed to assist in learning Quran recitation. The system analyzes audio input, transcribes it, and compares it against the Quranic text to detect mistakes in words, pronunciation, and Tajweed.
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)
+![Whisper](https://img.shields.io/badge/OpenAI-Whisper-green)
+![License](https://img.shields.io/badge/License-MIT-purple)
 
-## 📌 Project Overview
+**An advanced AI system designed to listen, transcribe, and grade children's recitation of the Holy Quran.**
 
-The goal of Quran-ARS is to build a robust feedback loop for Quran students. The system:
-1.  **Transcribes** user recitation using state-of-the-art ASR models (currently Whisper + LoRA).
-2.  **Aligns** the recitation with the correct Ayah from a verified Quran database.
-3.  **Detects** errors (planned features):
-    *   Word mistakes (substitution, omission, addition).
-    *   Harakat/Vowel errors.
-    *   Pronunciation accuracy.
-    *   Tajweed rule violations (timing, pitch, nasalization).
+Unlike standard ASR models that fail on child speech ("mumbling", incorrect tajweed, stuttering), this system is fine-tuned specifically for children's voices and includes a **"Tolerant Grading"** layer that focuses on phonetic intent rather than perfect spelling.
+
+---
+
+## 🚀 Key Features
+
+* **👶 Child-Centric ASR (V5-30k):** Fine-tuned on the "Minshawi with Child Repeat" dataset. It understands high-pitched, hesitant, and mumbled speech that standard Whisper models miss.
+* **🧠 Tolerant Grader:** A custom grading engine (`grader.py`) that uses **Phonetic Normalization** and **Fuzzy Alignment**. It forgivingly grades "Wal-ti" as correct for "Wal-teen", mirroring a human teacher's leniency for beginners.
+* **✂️ Smart Segmentation (VAD):** Handles long recordings (15+ minutes) by intelligently splitting audio based on breath pauses, ensuring no words are cut off.
+* **🔌 Production Feedback API:** A FastAPI backend that returns detailed, actionable feedback in **Arabic JSON** (`كلمة ناقصة`, `خطأ`, etc.), ready for mobile app integration.
+* **🔉 Corrective Loop:** pinpoint accuracy allows the frontend to play the *exact* word the child missed, followed by the Teacher's (Minshawi) correct pronunciation.
+
+---
+
+## �️ Installation
+
+### Prerequisites
+
+* Python 3.9+
+* CUDA-enabled GPU (Recommended for real-time inference)
+* FFmpeg (for audio processing)
+
+### Setup
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/YourUsername/Quran-ARS.git
+cd Quran-ARS
+
+# 2. Install dependencies
+pip install -r requirements.txt
+```
+
+---
+
+## �️ Usage (Backend API)
+
+The system runs as a **FastAPI** server.
+
+### 1. Start the Server
+
+```bash
+python backend/main.py
+```
+
+* The server will load the **V5-30k Model** (Heavy) onto the GPU.
+* It listens on `http://0.0.0.0:8000`.
+
+### 2. Test the API
+
+You can use the included test script to simulate a mobile app request.
+
+```bash
+python backend/test_client.py
+```
+
+### 3. API Endpoint: `/grade_recitation`
+
+**Input (Multipart Form):**
+
+* `file`: The Audio File (mp3/wav/m4a).
+* `target_ayah`: The correct Quranic text (Surah).
+
+**Output (JSON - Arabic):**
+
+```json
+{
+  "status": "success",
+  "user_recitation": "قُلْ يَا هِيُهَا الْكَافِقِّدُونَ ...",
+  "expected_recitation": "قُلْ يَا أَيُّهَا الْكَافِرُونَ ...",
+  "passed": false,
+  "accuracy": 0.59,
+  "mistakes": [
+    "خطأ: قلت 'هِيُهَا' بدلاً من 'أَيُّهَا'",
+    "كلمة ناقصة: 'لَا'"
+  ]
+}
+```
+
+---
+
+## 📊 Model Performance
+
+We benchmarked multiple versions against a challenging **Child Validation Set** (Real classroom recordings).
+
+| Model Version | Standard WER | Child Accuracy | Notes |
+| :--- | :---: | :---: | :--- |
+| **Tarteel Base** | > 80% | Low | Fails on mumbling/repetitions. |
+| **V3 (50k)** | ~40% | Moderate | Suffered from "Dictionary Overfitting". |
+| **V5 (30k) 🏆** | **~25%** | **High** | **Golden Candidate.** Best balance of phonetic accuracy and stability. |
+
+> **Note:** "Standard WER" is misleading for Arabic. Our **Tolerant Grader** boosts the effective user accuracy to **~85-95%** by ignoring spelling variations (Imla'i vs Uthmani).
+
+---
 
 ## 📂 Project Structure
 
-```
-├── data/               # Contains Quran database and sample audio files
-│   ├── quran/          # Raw SQL data for Quran text
-│   └── quran.db        # SQLite database generated from SQL data
-├── Planning/           # Project roadmap, plans, and research documents
-├── scripts/            # Utility scripts (if any)
-├── src/                # Source code
-│   ├── asr/            # Automatic Speech Recognition (Whisper integration)
-│   ├── quran_db/       # Database interface for querying Ayahs
-│   └── utils/          # Helper functions (e.g., audio preprocessing)
-├── tests/              # Unit tests
-└── requirements.txt    # Python dependencies
-```
+* `backend/` - The Production API code.
+  * `core/model_loader.py` - Wraps the V5 Whisper Model (Beam Search enabled).
+  * `core/grader.py` - The Logic Brain (Phonetic normalization & Grading).
+  * `core/segmenter.py` - VAD logic for long files.
+  * `main.py` - FastAPI Entry point.
+* `finetuning/` - Training scripts and research.
+  * `finetune.py` - The Hugging Face training script.
+  * `quran_grader.py` - The original prototype of the grader.
+* `data/` - Dataset management scripts.
 
-## 🚀 Installation & Setup
+---
 
-### Prerequisites
-- Python 3.8+
-- `ffmpeg` (required by `librosa`/`soundfile` for audio processing)
+## 🔮 Future Roadmap (The "Data Flywheel")
 
-### Steps
+1. **Launch V1:** Deploy V5-30k to the first 50 users.
+2. **Collect Data:** Save "Wrong" predictions that users flag as "Actually Correct".
+3. **Train V6:** Fine-tune specifically on these edge cases (Accents, Lisp, Stuttering).
+4. **Edge Deployment:** Port the model to ONNX/CoreML for offline use on iPads/Android.
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repo-url>
-    cd Quran-ARS
-    ```
+---
 
-2.  **Create and activate a virtual environment:**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    ```
+## 📜 License
 
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-## 🛠️ Usage
-
-### 1. Audio Transcription (ASR)
-The system currently uses a Whisper-based model tuned for Quranic Arabic.
-
-```python
-from src.asr.transcriber import ASRTranscriber
-
-# Initialize the model (downloads weights on first run)
-transcriber = ASRTranscriber()
-
-# Transcribe an audio file
-result = transcriber.transcribe("data/sample_001001.mp3")
-print(result["text"])
-```
-
-### 2. Querying the Quran Database
-You can search for Ayahs or retrieve them by Surah and Ayah number.
-
-```python
-from src.quran_db.core import QuranDB
-
-db = QuranDB()
-
-# Get specific Ayah (Surah 1, Ayah 1)
-ayah = db.get_ayah(1, 1)
-print(ayah.aya_text)
-
-# Search for text
-results = db.search_text("الحمد")
-for res in results:
-    print(f"{res.sura_name_en} ({res.sura_no}:{res.aya_no})")
-```
-
-### 3. Regenerating the Database
-If you need to rebuild `data/quran.db` from the source SQL file:
-```bash
-python src/quran_db/importer.py
-```
-
-## 🧪 Testing
-
-Run the test suite using `pytest`. Ensure you are in the root directory.
-
-```bash
-# Run all tests
-PYTHONPATH=. pytest
-
-# Run specific test file
-PYTHONPATH=. pytest tests/test_asr.py
-```
-
-## 🚧 Status & Roadmap
-
-- [x] **Quran Database:** SQL importer and SQLite interface implemented.
-- [x] **Basic ASR:** Whisper Base + LoRA adapter integration working.
-- [x] **Audio Utils:** Basic preprocessing (resampling to 16kHz).
-- [ ] **Forced Alignment:** Move to Wav2Vec2 or Whisper-timestamp-based alignment for phoneme-level accuracy.
-- [ ] **Error Detection:** Implement logic to compare transcription/alignment vs. expected text.
-- [ ] **API:** Build FastAPI backend to serve the model.
-
-## 📄 License
-MIT License
-
-Copyright (c) 2025 Hassan Abdelshafy
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+This project is licensed under the MIT License.

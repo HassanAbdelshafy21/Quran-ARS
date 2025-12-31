@@ -83,4 +83,30 @@ class AudioSegmenter:
             
             segments.append(seg_info)
             
-        return segments
+        # Post-Processing: Merge short segments to avoid Whisper Hallucination
+        # Whisper performs poorly on < 3s audio.
+        merged_segments = []
+        current_chunk = None
+        
+        for seg in segments:
+            if current_chunk is None:
+                current_chunk = seg
+            else:
+                # Check if merging exceeds 30s (Whisper limit)
+                new_duration = current_chunk['duration'] + seg['duration']
+                if new_duration < 15.0: # Merge until 15s
+                    # Merge logic
+                    import numpy as np
+                    current_chunk['end'] = seg['end']
+                    current_chunk['duration'] = new_duration
+                    current_chunk['audio_data'] = np.concatenate((current_chunk['audio_data'], seg['audio_data']))
+                else:
+                    # Flush current
+                    merged_segments.append(current_chunk)
+                    current_chunk = seg
+        
+        if current_chunk:
+            merged_segments.append(current_chunk)
+            
+        print(f"Merged into {len(merged_segments)} segments for inference.")
+        return merged_segments
