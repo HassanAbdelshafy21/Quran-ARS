@@ -1,20 +1,26 @@
 import requests
 
+# Configuration
 API_URL = "http://localhost:8000/grade_recitation"
-FILE_PATH = "finetuning/test_samples/test 6.mp4" # Al-Kafirun
-
-# Correct Text for Test 6 (Surah Al-Kafirun)
-TARGET_TEXT = "قُلْ يَا أَيُّهَا الْكَافِرُونَ لَا أَعْبُدُ مَا تَعْبُدُونَ وَلَا أَنْتُمْ عَابِدُونَ مَا أَعْبُدُ وَلَا أَنَا عَابِدٌ مَا عَبَدْتُمْ وَلَا أَنْتُمْ عَابِدُونَ مَا أَعْبُدُ لَكُمْ دِينُكُمْ وَلِيَ دِينِ"
+FILE_PATH = "finetuning/test_samples/test 3.ogg" # Updated to Test 3
+# Correct Text for Test 3 (Surah Al-Hadid 57:1-2)
+TARGET_TEXT = "سَبَّحَ لِلَّهِ مَا فِي السَّمَاوَاتِ وَالْأَرْضِ وَهُوَ الْعَزِيزُ الْحَكِيمُ لَهُ مُلْكُ السَّمَاوَاتِ وَالْأَرْضِ يُحْيِي وَيُمِيتُ وَهُوَ عَلَى كُلِّ شَيْءٍ قَدِيرٌ"
 
 def test_api():
     print(f"Sending {FILE_PATH} to {API_URL}...")
     
     with open(FILE_PATH, 'rb') as f:
-        files = {'file': f}
-        data = {'target_ayah': TARGET_TEXT}
         
         try:
-            response = requests.post(API_URL, files=files, data=data)
+            response = requests.post(
+                API_URL, 
+                files={"file": f}, 
+                data={
+                    "target_ayah": TARGET_TEXT,
+                    "surah_num": 57
+                    # "ayah_num": 1 # Full Surah mode
+                }
+            )
             
             if response.status_code == 200:
                 print("\n[SUCCESS]")
