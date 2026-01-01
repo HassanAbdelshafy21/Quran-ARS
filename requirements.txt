@@ -1,20 +1,21 @@
 fastapi
 uvicorn
 python-multipart
-# torch>=2.8 --pre --index-url https://download.pytorch.org/whl/nightly/cu128
+# torch>=2.0 --index-url https://download.pytorch.org/whl/cu118
 torchvision
+torchaudio
 transformers
-safetensors
-librosa
-numpy
-scipy
-soundfile
-peft
 accelerate
-protobuf
 datasets
 bitsandbytes
+peft
+safetensors
+protobuf
+scipy
+librosa
+soundfile
+numpy
+edge-tts
 requests
-torchaudio
-tensorboard
 jiwer
+tensorboard

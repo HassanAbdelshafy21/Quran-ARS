@@ -24,11 +24,12 @@ def test_api():
             
             if response.status_code == 200:
                 print("\n[SUCCESS]")
-                # Save to file to avoid Encoding Errors
+                # Save response to log
                 import json
-                with open("response_log.json", "w", encoding="utf-8") as f:
+                log_path = "data/logs/response_log.json"
+                with open(log_path, "w", encoding="utf-8") as f:
                     json.dump(response.json(), f, indent=2, ensure_ascii=False)
-                print("Saved response to response_log.json")
+                print(f"Saved response to {log_path}")
             else:
                 print(f"\n[ERROR] {response.status_code}: {response.text}")
                 

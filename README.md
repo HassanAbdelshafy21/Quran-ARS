@@ -15,34 +15,42 @@ Unlike standard ASR models that fail on child speech ("mumbling", incorrect tajw
 
 * **👶 Child-Centric ASR (V5-30k):** Fine-tuned on the "Minshawi with Child Repeat" dataset. It understands high-pitched, hesitant, and mumbled speech that standard Whisper models miss.
 * **🧠 Tolerant Grader:** A custom grading engine (`grader.py`) that uses **Phonetic Normalization** and **Fuzzy Alignment**. It forgivingly grades "Wal-ti" as correct for "Wal-teen", mirroring a human teacher's leniency for beginners.
-* **✂️ Smart Segmentation (VAD):** Handles long recordings (15+ minutes) by intelligently splitting audio based on breath pauses, ensuring no words are cut off.
-* **🔌 Production Feedback API:** A FastAPI backend that returns detailed, actionable feedback in **Arabic JSON** (`كلمة ناقصة`, `خطأ`, etc.), ready for mobile app integration.
-* **🔉 Corrective Loop:** pinpoint accuracy allows the frontend to play the *exact* word the child missed, followed by the Teacher's (Minshawi) correct pronunciation.
+* **🗣️ Speaking Teacher (TTS):** The system generates **Audio Feedback** using natural Arabic TTS. It praises correct recitation ("Ahsant!") and verbally corrects specific mistakes ("You forgot 'Wa-Huwa'").
+* **🔌 Production Feedback API:** A FastAPI backend that returns detailed, actionable feedback in **Arabic JSON**, ready for mobile app integration.
 
 ---
 
-## �️ Installation
+## 🛠️ Project Structure
+
+The repository is organized for production deployment:
+
+* **`backend/`**: The Core API.
+  * `main.py`: FastAPI entry point.
+  * `core/`: Model logic, Grader, TTS, and VAD.
+* **`data/logs/`**: All logs and JSON responses are saved here.
+* **`reports/`**: Generated Markdown reports (Student vs Parent views).
+* **`temp_storage/`**: Temporary audio files (recordings & TTS).
+* **`finetuning/`**: Research and Training scripts.
+
+---
+
+## 💻 Installation
 
 ### Prerequisites
 
 * Python 3.9+
-* CUDA-enabled GPU (Recommended for real-time inference)
-* FFmpeg (for audio processing)
+* CUDA-enabled GPU (Recommended)
+* FFmpeg
 
 ### Setup
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/YourUsername/Quran-ARS.git
-cd Quran-ARS
-
-# 2. Install dependencies
 pip install -r requirements.txt
 ```
 
 ---
 
-## �️ Usage (Backend API)
+## 🚀 Usage
 
 The system runs as a **FastAPI** server.
 
@@ -55,73 +63,43 @@ python backend/main.py
 * The server will load the **V5-30k Model** (Heavy) onto the GPU.
 * It listens on `http://0.0.0.0:8000`.
 
-### 2. Test the API
+### 2. Run the Demo Client
 
-You can use the included test script to simulate a mobile app request.
+We have a test script to simulate a mobile app request.
 
 ```bash
 python backend/test_client.py
 ```
 
-### 3. API Endpoint: `/grade_recitation`
-
-**Input (Multipart Form):**
-
-* `file`: The Audio File (mp3/wav/m4a).
-* `target_ayah`: The correct Quranic text (Surah).
-
-**Output (JSON - Arabic):**
-
-```json
-{
-  "status": "success",
-  "user_recitation": "قُلْ يَا هِيُهَا الْكَافِقِّدُونَ ...",
-  "expected_recitation": "قُلْ يَا أَيُّهَا الْكَافِرُونَ ...",
-  "passed": false,
-  "accuracy": 0.59,
-  "mistakes": [
-    "خطأ: قلت 'هِيُهَا' بدلاً من 'أَيُّهَا'",
-    "كلمة ناقصة: 'لَا'"
-  ]
-}
-```
+* **Edit `backend/test_client.py`** to switch between test files (e.g., `test 3.ogg` for Al-Hadid or `test 6.mp4` for Al-Kafirun).
+* The script sends the audio to the API and saves the response to `data/logs/response_log.json`.
 
 ---
 
-## 📊 Model Performance
+## 📱 The "Dual View" Experience
 
-We benchmarked multiple versions against a challenging **Child Validation Set** (Real classroom recordings).
+The system generates two levels of feedback:
 
-| Model Version | Standard WER | Child Accuracy | Notes |
-| :--- | :---: | :---: | :--- |
-| **Tarteel Base** | > 80% | Low | Fails on mumbling/repetitions. |
-| **V3 (50k)** | ~40% | Moderate | Suffered from "Dictionary Overfitting". |
-| **V5 (30k) 🏆** | **~25%** | **High** | **Golden Candidate.** Best balance of phonetic accuracy and stability. |
+### 🅰️ Parent View (Monitoring)
 
-> **Note:** "Standard WER" is misleading for Arabic. Our **Tolerant Grader** boosts the effective user accuracy to **~85-95%** by ignoring spelling variations (Imla'i vs Uthmani).
+* Full Transcription of what the child said.
+* Detailed list of mistakes.
+* Accuracy Score.
 
----
+### 🅱️ Student View (Learning)
 
-## 📂 Project Structure
-
-* `backend/` - The Production API code.
-  * `core/model_loader.py` - Wraps the V5 Whisper Model (Beam Search enabled).
-  * `core/grader.py` - The Logic Brain (Phonetic normalization & Grading).
-  * `core/segmenter.py` - VAD logic for long files.
-  * `main.py` - FastAPI Entry point.
-* `finetuning/` - Training scripts and research.
-  * `finetune.py` - The Hugging Face training script.
-  * `quran_grader.py` - The original prototype of the grader.
-* `data/` - Dataset management scripts.
+* **Interactive Feedback:** "The Teacher" speaks to them.
+* **Sheikh Comparison:** If they make mistakes, they get a link to Sheikh Minshawi's correct recitation.
+* **Celebration:** If they get 100%, the correction section disappears!
 
 ---
 
-## 🔮 Future Roadmap (The "Data Flywheel")
+## 📊 Benchmarks
 
-1. **Launch V1:** Deploy V5-30k to the first 50 users.
-2. **Collect Data:** Save "Wrong" predictions that users flag as "Actually Correct".
-3. **Train V6:** Fine-tune specifically on these edge cases (Accents, Lisp, Stuttering).
-4. **Edge Deployment:** Port the model to ONNX/CoreML for offline use on iPads/Android.
+| Model | Child Accuracy | Notes |
+| :--- | :---: | :--- |
+| **Baseline** | Low | Fails on mumbling. |
+| **V5 (30k) 🏆** | **High (~95%)** | **Golden Candidate.** Best balance of phonetic accuracy and stability. |
 
 ---
 
