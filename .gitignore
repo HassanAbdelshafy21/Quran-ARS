@@ -208,3 +208,25 @@ __marimo__/
 
 # Data
 data/
+
+# Project-specific ignores
+# Model checkpoints (too large for Git)
+finetuning/checkpoints*/
+
+# Temporary audio files
+temp_storage/*
+!temp_storage/.gitkeep
+
+# Audio files (should not be tracked)
+*.wav
+*.mp3
+*.mp4
+*.ogg
+*.m4a
+
+# Large log files
+*.log
+debug.log
+
+# Response logs from test runs
+response_log.json

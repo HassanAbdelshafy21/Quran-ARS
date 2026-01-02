@@ -19,7 +19,16 @@ class QuranModel:
         print(f"Loading Model from {checkpoint_path} on {self.device}...")
         
         self.processor = WhisperProcessor.from_pretrained("tarteel-ai/whisper-base-ar-quran")
-        self.model = WhisperForConditionalGeneration.from_pretrained(checkpoint_path).to(self.device)
+        
+        # Handle local paths correctly for newer transformers versions
+        if os.path.isdir(checkpoint_path):
+            self.model = WhisperForConditionalGeneration.from_pretrained(
+                checkpoint_path, 
+                local_files_only=True,
+                trust_remote_code=True
+            ).to(self.device)
+        else:
+            self.model = WhisperForConditionalGeneration.from_pretrained(checkpoint_path).to(self.device)
         
         # Optimization
         if self.device == "cuda":
