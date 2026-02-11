@@ -1,0 +1,32 @@
+# Quran ASR Kids API — Python Dependencies
+# Install: pip install -r requirements.txt
+# Note: Install PyTorch first with CUDA support if you have a GPU:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# --- API Server ---
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+
+# --- AI / ML ---
+torch>=2.0.0
+transformers>=4.36.0
+accelerate>=0.25.0
+peft>=0.7.0
+safetensors>=0.4.0
+
+# --- Audio Processing ---
+librosa>=0.10.1
+soundfile>=0.12.1
+numpy>=1.24.0
+scipy>=1.11.0
+
+# --- Text Processing ---
+jiwer>=3.0.3
+
+# --- TTS (Text-to-Speech) ---
+edge-tts>=6.1.9
+
+# --- Utilities ---
+requests>=2.31.0
+moviepy>=1.0.3

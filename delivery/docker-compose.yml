@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  quran-asr:
+    build: .
+    container_name: quran-asr
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./temp_storage:/app/temp_storage
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    environment:
+      - CUDA_VISIBLE_DEVICES=0

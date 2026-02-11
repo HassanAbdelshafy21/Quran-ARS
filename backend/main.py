@@ -19,7 +19,7 @@ from core.model_loader import QuranModel
 from core.tts import generate_feedback_audio # Import async function
 
 # Initialize App
-app = FastAPI(title="Quran ASR Kids API", version="1.0.0")
+app = FastAPI(title="Quran ASR Kids API", version="2.0.0")
 
 # Global State
 MODEL_CHECKPOINT = "finetuning/checkpoints_v5/checkpoint-30000"
@@ -61,7 +61,20 @@ async def grade_recitation(
     ayah_num: int = Form(default=None)
 ):
     """
-    Main Endpoint: Returns Grade + Request ID + Feedback Audio + Reference Audio.
+    Main Endpoint: Returns Grade + Per-Word Analysis + Timestamps + Feedback Audio.
+    
+    Request (Multipart Form):
+      - file: Audio file (MP3, WAV, OGG, M4A)
+      - target_ayah: Expected Quranic text (or Ayah ID)
+      - surah_num: Surah number (1-114)
+      - ayah_num: Specific Ayah number (optional)
+    
+    Response includes:
+      - Overall accuracy score
+      - Per-word analysis with error types and character-level errors
+      - Word-level timestamps
+      - TTS feedback audio URL
+      - Sheikh reference audio URL (when failed)
     """
     if not model:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -77,39 +90,70 @@ async def grade_recitation(
     try:
         print(f"Processing Request {request_id} ({file.filename})")
         
-        # 2. Segment & Transcribe
+        # 2. Segment & Transcribe (with timestamps)
         segments = segmenter.segment_file(cached_path)
         full_transcript = []
+        all_word_timestamps = []
+        segment_time_offset = 0.0
+        
         for seg in segments:
-            text = model.transcribe(seg['audio_data'])
-            if text: full_transcript.append(text)
+            result = model.transcribe(seg['audio_data'])
+            text = result['text']
+            word_ts = result.get('words', [])
+            
+            if text:
+                full_transcript.append(text)
+                
+                # Adjust timestamps with segment offset
+                for wt in word_ts:
+                    adjusted = {
+                        "word": wt["word"],
+                        "start": round(wt["start"] + segment_time_offset, 2) if wt["start"] is not None else None,
+                        "end": round(wt["end"] + segment_time_offset, 2) if wt["end"] is not None else None,
+                    }
+                    all_word_timestamps.append(adjusted)
+                
+            segment_time_offset += seg.get('duration', 0)
                 
         final_text = " ".join(full_transcript)
         
-        # 3. Grade
-        result = grader.grade(final_text, target_ayah)
+        # 3. Grade (with per-word analysis and character-level errors)
+        grade_result = grader.grade(final_text, target_ayah)
         
-        # 4. Generate TTS Feedback
+        # 4. Merge timestamps into word details
+        words_detail = grade_result.get('words', [])
+        
+        # Map timestamps to graded words (best-effort matching)
+        ts_index = 0
+        for wd in words_detail:
+            if wd['word'] is not None and ts_index < len(all_word_timestamps):
+                wd['timestamp_start'] = all_word_timestamps[ts_index].get('start')
+                wd['timestamp_end'] = all_word_timestamps[ts_index].get('end')
+                ts_index += 1
+            else:
+                wd['timestamp_start'] = None
+                wd['timestamp_end'] = None
+        
+        # 5. Generate TTS Feedback
         feedback_filename = f"feedback_{request_id}.mp3"
         feedback_path = os.path.join(TEMP_STORAGE, feedback_filename)
-        mistakes = result['mistakes'] if result['mistakes'] else []
+        mistakes = grade_result['mistakes'] if grade_result['mistakes'] else []
         
         # Generate Audio (Async)
         await generate_feedback_audio(mistakes, feedback_path)
         
-        # feedback_url = f"/audio/{feedback_filename}"
         # Use absolute URL for client convenience
         base_url = str(request.base_url).rstrip("/")
         feedback_url = f"{base_url}/audio/{feedback_filename}"
         
-        # 5. Generate Reference Audio URL (Minshawi)
+        # 6. Generate Reference Audio URL (Minshawi)
         ref_url = None
         if surah_num:
             s_str = f"{surah_num:03d}"
             
             # Conditional Reference Audio:
             # If passed, we don't need to send the Sheikh audio (as per user rule).
-            if result['passed']:
+            if grade_result['passed']:
                 ref_url = None
             else:
                  if ayah_num:
@@ -120,14 +164,17 @@ async def grade_recitation(
                     # Full Surah (MP3Quran)
                     ref_url = f"https://server10.mp3quran.net/minsh/{s_str}.mp3"
         
+        # 7. Build Enhanced Response
         response = {
             "request_id": request_id, 
             "status": "success",
             "user_recitation": final_text,
             "expected_recitation": target_ayah,
-            "passed": result['passed'],
-            "accuracy": result['accuracy'],
-            "mistakes": result['mistakes'],
+            "passed": grade_result['passed'],
+            "accuracy": grade_result['accuracy'],
+            "raw_score": grade_result['raw_score'],
+            "mistakes": grade_result['mistakes'],
+            "words": words_detail,
             "feedback_audio": feedback_url,
             "reference_audio": ref_url, # Will be None if passed
             "segments_processed": len(segments)
