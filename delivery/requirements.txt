@@ -9,10 +9,12 @@ uvicorn>=0.24.0
 python-multipart>=0.0.6
 
 # --- AI / ML ---
+# transformers/peft are PINNED: newer transformers (5.x) breaks Whisper
+# return_timestamps and the LoRA-adapter load path. This combo is verified working.
 torch>=2.0.0
-transformers>=4.36.0
+transformers==4.46.3
 accelerate>=0.25.0
-peft>=0.7.0
+peft==0.19.1
 safetensors>=0.4.0
 
 # --- Audio Processing ---
