@@ -526,14 +526,18 @@ async def get_metrics():
 | 4 | **File size limit** | Nginx: `client_max_body_size 50M;` |
 | 5 | **Firewall** | Only expose ports 80, 443. Block 8000 externally |
 | 6 | **API Key** (optional) | Add header check in FastAPI middleware |
-| 7 | **Temp cleanup** | Cron: `find /opt/quran-asr/temp_storage -mmin +60 -delete` |
+| 7 | **Temp cleanup** | Cron (30-day, see note below) — do **not** delete `feedback_*.mp3` early |
 | 8 | **Non-root** | Run as non-root user (systemd User= directive) |
 
 ### Temp File Cleanup Cron
 
+> ⚠️ **Do not delete `feedback_*.mp3` after 1 hour.** The backend references those TTS
+> feedback URLs for **30 days** (recitation lifetime). Deleting them early breaks playback
+> of past recitations. Clean only files older than 30 days:
+
 ```bash
-# Clean audio files older than 1 hour (every 30 minutes)
-*/30 * * * * find /opt/quran-asr/temp_storage -type f -mmin +60 -delete
+# Clean temp files older than 30 days (once daily)
+0 3 * * * find /opt/quran-asr/temp_storage -type f -mtime +30 -delete
 ```
 
 ### Optional: API Key Authentication
