@@ -140,7 +140,10 @@ PUBLIC_BASE_URL=https://ai.yutlaquran.com        # required; makes audio URLs ab
 **Docker (recommended):**
 ```bash
 cd delivery
-docker compose up -d          # or: docker build -t quran-asr . && docker run --gpus all -p 8000:8000 ...
+# Provide the env first (compose reads a .env in this folder). AI_API_KEY is required —
+# without it, compose refuses to start rather than silently 401-ing every request.
+printf 'AI_API_KEY=%s\nPUBLIC_BASE_URL=%s\n' "$AI_API_KEY" "https://ai.yutlaquran.com" > .env
+docker compose up -d          # or: docker build -t quran-asr . && docker run --gpus all -e AI_API_KEY=... -e PUBLIC_BASE_URL=... -p 8000:8000 quran-asr
 curl http://localhost:8000/health
 ```
 

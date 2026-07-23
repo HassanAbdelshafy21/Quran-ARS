@@ -24,3 +24,8 @@ services:
       retries: 3
     environment:
       - CUDA_VISIBLE_DEVICES=0
+      # Required. Set these in the shell env or a .env file next to this compose file.
+      # `:?` makes `docker compose up` fail loudly if AI_API_KEY is missing, instead of
+      # the service silently 401-ing every request.
+      - AI_API_KEY=${AI_API_KEY:?set AI_API_KEY (shared secret from the backend team)}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:8000}
