@@ -230,3 +230,12 @@ debug.log
 
 # Response logs from test runs
 response_log.json
+
+# Claude Code working config (not product code)
+.claude/
+
+# Windows "downloaded file" metadata cruft
+*:Zone.Identifier
+
+# Research/experiment binary outputs
+*.npz

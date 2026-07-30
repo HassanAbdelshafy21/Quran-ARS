@@ -26,7 +26,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from core.grader import QuranGrader
 from core.segmenter import AudioSegmenter
-from core.model_loader import QuranModel
+from core.namaa_model import NamaaModel
+from core.harakat_grader import grade_harakat
 from core.tts import generate_feedback_audio
 from core.quran_db import QuranDB
 
@@ -42,7 +43,6 @@ app = FastAPI(
 
 # --- Configuration ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_CHECKPOINT = os.path.join(BASE_DIR, "model", "checkpoint-30000")
 
 # Env config for the async integration (see AI-Integration-Spec-AR.md)
 AI_API_KEY = os.getenv("AI_API_KEY", "")
@@ -68,11 +68,10 @@ app.mount("/audio", StaticFiles(directory=TEMP_STORAGE), name="audio")
 def load_resources():
     global model, grader, segmenter, quran_db
     print("=" * 50)
-    print("Initializing Quran ASR Backend...")
-    print(f"Model Path: {MODEL_CHECKPOINT}")
+    print("Initializing Quran ASR Backend (NAMAA)...")
     print("=" * 50)
     try:
-        model = QuranModel(MODEL_CHECKPOINT)
+        model = NamaaModel()
     except Exception as e:
         print(f"⚠️  CRITICAL: Failed to load model: {e}")
         print("   The API will return 503 for /grade_recitation")
@@ -126,6 +125,15 @@ async def run_grading(audio_path, target_ayah, surah_num=None, ayah_num=None, ui
     grade_result = grader.grade(final_text, target_ayah)
     words_detail = grade_result.get('words', [])
 
+    # 2b. Harakat/tajweed grading (NAMAA's diacritics are acoustic, so this reflects
+    # what the learner actually pronounced). Only correctly-recited words are checked;
+    # tajweed tolerances (waqf, shadda, implicit-sukun) keep false-rejections low. Non-fatal.
+    try:
+        harakat = grade_harakat(final_text, target_ayah)
+    except Exception as e:
+        print(f"Harakat grading failed (non-critical): {e}")
+        harakat = {"words": [], "harakat_errors": [], "checked": 0, "wrong": 0}
+
     # 3. Merge timestamps into word details
     ts_index = 0
     for wd in words_detail:
@@ -156,6 +164,9 @@ async def run_grading(audio_path, target_ayah, surah_num=None, ayah_num=None, ui
     return {
         "uid": uid,
         "user_recitation": final_text,
+        "user_recitation_diacritized": final_text,   # NAMAA output is the actual diacritized recitation
+        "harakat_checked": harakat["checked"],
+        "harakat_errors": harakat["harakat_errors"],
         "expected_recitation": target_ayah,
         "passed": grade_result['passed'],
         "accuracy": grade_result['accuracy'],
