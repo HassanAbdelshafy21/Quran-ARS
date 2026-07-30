@@ -37,6 +37,15 @@ by doing.
    detection & diagnosis task, Goodness-of-Pronunciation (GOP) math, forced alignment,
    text vs. audio diacritization, and how this project ended up doing it with one model.
 
+### Advanced
+
+- **[Appendix A — Worked Examples](appendix-A-worked-examples.md)** — Viterbi & forced alignment
+  done by hand, and the full **attention backward pass** derivation.
+- **[`from_scratch.py`](from_scratch.py)** — runnable pure-NumPy implementations of the log-mel
+  front end, the CTC forward/loss + greedy decode, and attention forward+backward, each with a
+  self-test (CTC is verified against Chapter 3's hand example *and* PyTorch; attention against a
+  finite-difference gradient check). Run: `python from_scratch.py`.
+
 ## Notation
 - Scalars $x$, vectors $\mathbf{x}$, matrices $\mathbf{X}$. Time index $t$ or $n$; frequency
   index $k$; layer index $\ell$.
