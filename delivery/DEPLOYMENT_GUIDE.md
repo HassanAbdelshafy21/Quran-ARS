@@ -27,15 +27,16 @@ A complete guide to deploy and serve the Quran ASR API on cloud infrastructure.
 
 | Item | Value |
 |:-----|:------|
-| **Min RAM** | 4 GB |
-| **Recommended RAM** | 8 GB+ |
-| **GPU** | NVIDIA T4 / L4 / A10G (any CUDA GPU) |
-| **CPU-only?** | Yes, but ~10x slower inference |
-| **Disk** | 10 GB (model + deps + cache) |
+| **Model** | `NAMAA-Space/Cohere-Speech-Tashkeel-2B` (single 2B model: words + harakat) |
+| **GPU** | **Required** — NVIDIA **T4 (16 GB) / L4 / A10G** (needs ~5–6 GB VRAM, bf16) |
+| **CPU-only?** | **No** — impractical for a 2B model |
+| **System RAM** | 8 GB+ |
+| **Disk** | ~15 GB (model ~5 GB + deps + cache) |
 | **Port** | 8000 (default) |
-| **Python** | 3.9+ |
-| **CUDA** | 11.8+ |
-| **Base model download** | ~300 MB (first run, from HuggingFace) |
+| **Python** | 3.11 |
+| **CUDA** | 12.x |
+| **transformers** | **≥ 5.4** (do not downgrade) · **bf16 required** (fp16 → garbage) |
+| **Model download** | ~5 GB (baked into the Docker image at build; or first run from HuggingFace) |
 | **Health check** | `GET /health` |
 
 ---
@@ -44,58 +45,32 @@ A complete guide to deploy and serve the Quran ASR API on cloud infrastructure.
 
 ### Dockerfile
 
-Create this `Dockerfile` inside the `delivery/` folder:
-
-```dockerfile
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
-
-# System deps
-RUN apt-get update && apt-get install -y \
-    python3.10 python3-pip ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
-# Working directory
-WORKDIR /app
-
-# Install Python deps
-COPY requirements.txt .
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-RUN pip3 install -r requirements.txt
-
-# Copy application
-COPY . .
-
-# Expose port
-EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python3 -c "import requests; r=requests.get('http://localhost:8000/health'); exit(0 if r.status_code==200 else 1)"
-
-# Run server
-CMD ["python3", "main.py"]
-```
+**Do not write your own** — a ready `delivery/Dockerfile` is in the repo, already configured for
+the NAMAA model (CUDA 12.1 runtime, Python 3.11, `torch` cu121, `transformers>=5.4`, and it
+**bakes the ~5 GB model into the image** at build time so startup is fast and offline-capable).
+Just build it. (If you want to inspect it: `cat delivery/Dockerfile`.)
 
 ### Build & Run
 
 ```bash
-# Build
+cd delivery
+
+# Build (downloads the model into the image — first build is large/slow, ~5 GB)
 docker build -t quran-asr .
 
-# Run with GPU
+# Run with GPU (a CUDA GPU is REQUIRED — the 2B model is impractical on CPU)
 docker run -d \
     --name quran-asr \
     --gpus all \
     -p 8000:8000 \
+    -e AI_API_KEY="<shared secret>" \
+    -e PUBLIC_BASE_URL="https://ai.yutlaquran.com" \
     -v $(pwd)/temp_storage:/app/temp_storage \
     --restart unless-stopped \
     quran-asr
 
-# Check logs
-docker logs -f quran-asr
-
-# Check health
-curl http://localhost:8000/health
+docker logs -f quran-asr            # watch it load NAMAA (~10–30 s)
+curl http://localhost:8000/health   # {"status":"ok","model_loaded":true}
 ```
 
 ### Docker Compose

@@ -48,7 +48,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AI_API_KEY = os.getenv("AI_API_KEY", "")
 # Public, absolute base URL for audio links. localhost is useless to a phone. (§6.4)
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
-MODEL_VERSION = "v5-30k"
+MODEL_VERSION = "namaa-cohere-speech-tashkeel-2b"
 
 # Global State
 model = None
@@ -311,7 +311,22 @@ async def _process_and_callback(job_id: str, req: EvaluateRequest):
                 "correctWords": sum(1 for w in words if w["is_correct"]),
                 "incorrectWords": sum(1 for w in words if not w["is_correct"]),
                 "userRecitation": r["user_recitation"],
+                # The learner's ACTUAL diacritized recitation (NAMAA acoustic output) — show this
+                "userRecitationDiacritized": r["user_recitation_diacritized"],
                 "expectedRecitation": r["expected_recitation"],
+                # Tajweed/harakat feedback: for correctly-recited words, where the vowel differed
+                "harakatChecked": r["harakat_checked"],
+                "harakatErrors": [
+                    {
+                        "word": e["word"],
+                        "expectedWord": e["expected_word"],
+                        "details": [
+                            {"letter": d["letter"], "got": d["got"], "expected": d["expected"]}
+                            for d in e["details"]
+                        ],
+                    }
+                    for e in r["harakat_errors"]
+                ],
                 "words": [
                     {
                         "word": w["word"],

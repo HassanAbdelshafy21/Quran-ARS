@@ -13,9 +13,12 @@ from `AI-Integration-Spec-AR.md` exactly.
 
 - New endpoint **`POST /api/evaluate`** — async: replies instantly with a `jobId`,
   processes in the background, POSTs the result to your `webhookUrl`.
-- The old **`POST /grade_recitation`** (sync, multipart) is **unchanged** — kept for demo/testing.
-- Grader, model, VAD, and TTS logic are **unchanged** — only a new async wrapper was added.
-- All 13 acceptance checks pass, including **`webm`** audio and the **0–100 score** conversion.
+- The old **`POST /grade_recitation`** (sync, multipart) still works — kept for demo/testing.
+- **Model is now a single one — `NAMAA-Space/Cohere-Speech-Tashkeel-2B`** — which grades **words
+  (memorization) AND harakat (tajweed)** in one pass and returns the learner's actual diacritized
+  recitation. The API contract, webhook shape, and 0–100 scoring are unchanged; two `data` fields
+  were added (`userRecitationDiacritized`, `harakatErrors`). Requires a **CUDA GPU** (§7).
+- The async contract and 0–100 score conversion pass all acceptance checks (incl. **`webm`** audio).
 
 ---
 
@@ -76,7 +79,13 @@ Bad/missing `Authorization` → `401` `{ "status":"error", "message":"Invalid AP
     "correctWords": 7,
     "incorrectWords": 1,
     "userRecitation": "...",
+    "userRecitationDiacritized": "قُلْ هُوَ اللَّهُ أَحَدْ ...",
     "expectedRecitation": "...",
+    "harakatChecked": 6,
+    "harakatErrors": [
+      { "word": "دِينَكُمْ", "expectedWord": "دِينُكُمْ",
+        "details": [ { "letter": "ن", "got": "fatha", "expected": "damma" } ] }
+    ],
     "words": [
       {
         "word": "بسم", "expected": "بسم",
@@ -95,10 +104,18 @@ Bad/missing `Authorization` → `401` `{ "status":"error", "message":"Invalid AP
     "referenceAudio": "https://everyayah.com/data/Minshawy_Mujawwad_192kbps/001001.mp3",
     "segmentsProcessed": 2,
     "requestId": "8f14e45f-...",
-    "modelVersion": "v5-30k"
+    "modelVersion": "namaa-cohere-speech-tashkeel-2b"
   }
 }
 ```
+
+> **New fields (single-model NAMAA architecture):**
+> - `userRecitationDiacritized` — the learner's **actual** recitation **with tashkeel** (acoustic,
+>   i.e. their real vowels, not the "correct answer"). Show this to the user.
+> - `harakatChecked` — how many correctly-recited words were checked for tajweed.
+> - `harakatErrors[]` — per word where the **vowel** differed: `word`, `expectedWord`, and
+>   `details[]` of `{ letter, got, expected }` (e.g. said *fatha*, expected *damma*). Empty = clean.
+> - `words[].timestampStart/End` are `null` (the model does not emit word timestamps).
 
 ### Webhook — error
 ```json
@@ -153,20 +170,26 @@ pip install -r requirements.txt   # torch first if GPU (see DEPLOYMENT_GUIDE.md)
 AI_API_KEY=... PUBLIC_BASE_URL=... python main.py
 ```
 
-First boot downloads the ~300 MB base model from HuggingFace (needs internet once).
-See `DEPLOYMENT_GUIDE.md` for cloud/GPU/systemd/Nginx details.
+The `Dockerfile` **bakes the model into the image** (build-time download), so containers start
+without needing internet. If you run directly, first boot downloads the model (~5 GB) from
+HuggingFace once. See `DEPLOYMENT_GUIDE.md` for cloud/GPU/systemd/Nginx details.
 
 ---
 
-## 7. What we fixed to make it deployable
+## 7. The model & system requirements (single-model architecture)
 
-- Model loading: load base `tarteel-ai/whisper-base-ar-quran` + merge the LoRA adapter (was crashing on boot).
-- Transcription: set `no_timestamps_token_id` so timestamps work on modern transformers.
-- Word timestamps: rewrote the parser; per-word `start`/`end` now populate (approximate, evenly spread).
-- Dockerfile: fixed the build; pinned `transformers==4.46.3`, `peft==0.19.1`.
-- Added `httpx` and the async `/api/evaluate` + `get_ayah_range`.
-
-Verified end-to-end on GPU (FP16): perfect Basmala transcription, 100% grade, ~0.57s warm.
+- **Model:** `NAMAA-Space/Cohere-Speech-Tashkeel-2B` — one 2B ASR that outputs the learner's
+  **actual diacritized recitation** (words + harakat). From that, the service grades **words**
+  (memorization) *and* **harakat** (tajweed) — no second model, no CATT, no Whisper.
+- **Hardware:** a **CUDA GPU is required** (CPU is impractical for a 2B model). Needs **~5–6 GB
+  VRAM** in bf16 — a **T4 (16 GB) / L4 / A10G** is plenty. Disk ~15 GB (model + deps).
+- **Software:** CUDA 12.x, Python 3.11, **`transformers>=5.4`**, `torch` cu121, `accelerate`,
+  `sentencepiece`, `protobuf`. **bf16 is required** (fp16 overflows an attention mask → garbage).
+- **Latency:** ~0.2–2 s per recitation on a warm GPU (async anyway — the caller gets a `jobId`
+  immediately and the result via webhook).
+- The async `/api/evaluate` contract, webhook shape, and 0–100 scoring are **unchanged** from your
+  spec — only the model behind them and the two new `data` fields (`userRecitationDiacritized`,
+  `harakatErrors`) were added.
 
 ---
 
@@ -174,7 +197,11 @@ Verified end-to-end on GPU (FP16): perfect Basmala transcription, 100% grade, ~0
 
 - **Feedback audio retention:** `feedback_*.mp3` files persist in `temp_storage/` (served at `/audio/`).
   Keep them **≥ 30 days** — do **not** enable a 1-hour temp-cleanup cron on `feedback_*` files (see DEPLOYMENT_GUIDE.md, updated).
-- **Timestamps are approximate** (evenly spread across the recited span) — fine for word-highlighting, not frame-accurate.
+- **Word timestamps are `null`** — this model does not emit per-word timings. If you need
+  word-highlighting synced to audio, that's a separate (future) feature.
+- **Tashkeel is acoustic:** `userRecitationDiacritized` shows the learner's *real* vowels (so a
+  wrong vowel appears wrong). `harakatErrors[]` is the tajweed feedback; it uses tajweed-aware
+  tolerances (waqf/shadda) so it does **not** flag correct pausing — false-rejection ≈ 0–1%.
 - **`suggestions`** array is not currently produced (our grader doesn't generate coaching tips). Easy to add if you want it.
 - Local GPU testing used a newer torch/GPU than the T4 deploy target; the version-exact run happens on your T4/cluster.
 
