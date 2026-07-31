@@ -16,7 +16,9 @@ import json
 import asyncio
 import tempfile
 import logging
+import hmac
 import httpx
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.staticfiles import StaticFiles
@@ -35,10 +37,17 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("quran-asr")
 
 # Initialize App
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_resources()   # runs once at startup (defined below)
+    yield
+
+
 app = FastAPI(
     title="Quran ASR Kids API",
     version="2.0.0",
-    description="AI system to listen, transcribe, and grade children's Quran recitation."
+    description="AI system to listen, transcribe, and grade children's Quran recitation.",
+    lifespan=lifespan,
 )
 
 # --- Configuration ---
@@ -46,6 +55,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Env config for the async integration (see AI-Integration-Spec-AR.md)
 AI_API_KEY = os.getenv("AI_API_KEY", "")
+
+
+def _valid_api_key(authorization: str | None) -> bool:
+    """Constant-time check of the Bearer key. Empty AI_API_KEY never authenticates."""
+    if not AI_API_KEY or not authorization:
+        return False
+    return hmac.compare_digest(authorization, f"Bearer {AI_API_KEY}")
+
+
 # Public, absolute base URL for audio links. localhost is useless to a phone. (§6.4)
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
 MODEL_VERSION = "namaa-cohere-speech-tashkeel-2b"
@@ -64,7 +82,6 @@ os.makedirs(TEMP_STORAGE, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=TEMP_STORAGE), name="audio")
 
 
-@app.on_event("startup")
 def load_resources():
     global model, grader, segmenter, quran_db
     print("=" * 50)
@@ -264,7 +281,7 @@ async def evaluate_async(
     authorization: str = Header(None),
 ):
     # Auth (§3.3)
-    if not AI_API_KEY or authorization != f"Bearer {AI_API_KEY}":
+    if not _valid_api_key(authorization):
         return JSONResponse(
             status_code=401,
             content={"status": "error", "message": "Invalid API key", "code": "AUTH_FAILED"},
@@ -451,7 +468,7 @@ async def report_issue(report: ReportRequest):
 @app.get("/health", summary="Health check")
 async def health():
     return {
-        "status": "healthy",
+        "status": "ok",
         "model_loaded": model is not None,
         "version": "2.0.0"
     }
