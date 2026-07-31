@@ -101,6 +101,7 @@ Quran-ARS/
 │
 ├── reports/                  # Demo Reports (Arabic)
 ├── docs/                     # Planning & Benchmark Documents
+├── learning/                 # Study materials: Learning Guide, deep-dive series, tech docs
 ├── requirements.txt          # Python Dependencies (with versions)
 └── README.md                 # This File
 ```

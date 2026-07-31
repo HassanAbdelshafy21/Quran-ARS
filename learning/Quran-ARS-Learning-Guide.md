@@ -445,4 +445,4 @@ Build/run with `delivery/Dockerfile` + `docker-compose.yml` on a GPU host.
 ---
 
 *Companion reference with the exhaustive experiment log and exact numbers:
-`docs/Quran-ARS-Technical-Documentation.md`.*
+[`Quran-ARS-Technical-Documentation.md`](Quran-ARS-Technical-Documentation.md).*
