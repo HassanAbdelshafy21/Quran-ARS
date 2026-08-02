@@ -14,9 +14,31 @@
 2. **Push** it to Docker Hub.
 3. **Create a Network Volume** (so feedback audio survives worker restarts).
 4. **Create a Serverless endpoint** — type **Load Balancer**, 24 GB GPU, and set
-   ⚠️ **Idle Timeout = 90 s** (critical — see §8.1).
+   ⚠️ **Idle Timeout = 60 s** for testing (critical — see §8.1).
 5. **Set `PUBLIC_BASE_URL`** to the endpoint URL you just got, and restart workers.
 6. **Test** with curl + webhook.site, then hand the URL + key to the backend.
+
+---
+
+## 0.1 💸 Cheapest setup (testing / private beta) — use this
+
+If this is for **testing**, configure it to cost as close to nothing as possible. Pure
+scale-to-zero: you pay only for the seconds a request is actually being processed.
+
+| Setting | Cheapest value | Note |
+|---|---|---|
+| **Active workers (`workersMin`)** | **0** | ⭐ the big one — nothing runs when idle |
+| **Max workers** | **1** | stops accidental parallel spend |
+| **Idle timeout** | **60 s** | the floor that still lets the webhook finish (§8.1) |
+| **GPU** | **16 GB** tier | model needs ~6 GB. Prefer **A4000/A4500/RTX 4000 Ada**; avoid **T4** (no native bf16 → slow) |
+| **FlashBoot** | **on** | free, cuts cold-start time |
+| **Network volume** | **10 GB** (~$0.70/mo) | keeps feedback audio alive; skip only if you don't test `feedbackAudio` |
+| Scheduled warm hours (§11) | **don't bother** | that's a latency optimization for real traffic, not testing |
+
+**Expected bill while testing:** a few hundred requests ≈ **$1–5/month**, plus ~$0.70 for the
+volume. Idle time is genuinely free at `workersMin = 0`.
+
+> Delete the endpoint (and volume) when you're done testing to stop all charges.
 
 ---
 
@@ -125,13 +147,13 @@ Console → **Serverless → New Endpoint**.
 |---|---|---|
 | **Endpoint type** | **Load Balancer** | we serve our own HTTP API (§1) |
 | **Container image** | `<DOCKERHUB_USER>/quran-ars:v1` | what you pushed |
-| **GPU** | **24 GB** tier (L4 / A5000 / 3090) — 16 GB also works | model uses ~6 GB; headroom + speed |
+| **GPU** | **16 GB** tier for testing (24 GB for production) | model uses ~6 GB. Avoid **T4** — no native bf16 |
 | **Expose HTTP port** | **8000** | our app's default port |
 | **Container disk** | **25 GB** | must exceed the image size |
 | **Network volume** | `quran-ars-vol` (same region) | persistent feedback audio (§5) |
 | **Active workers** | **0** | scale to zero = pay only when used |
-| **Max workers** | **1–3** to start | raise later for concurrency |
-| ⚠️ **Idle timeout** | **90 seconds** (never below 60 s) | **critical** — see §8.1; also drives cost (§10) |
+| **Max workers** | **1** for testing | raise later for concurrency |
+| ⚠️ **Idle timeout** | **60 s** (testing) / 90 s (production) — never below 60 s | **critical** — see §8.1; also drives cost (§10) |
 | **Execution timeout** | leave default (≥ 5 min) | our request returns in <2 s |
 
 ### Environment variables
@@ -305,7 +327,11 @@ Plus **network volume** ≈ $0.07/GB/month (20 GB ≈ **$1.40/mo**).
 
 ---
 
-## 11. Scheduled warm hours (1 active worker 10:00–17:00, 0 otherwise)
+## 11. (OPTIONAL — not for testing) Scheduled warm hours, 10:00–17:00
+
+> ⏭️ **Skip this section while testing.** Keep `workersMin = 0` (§0.1). This is a
+> latency optimization for *real production traffic*; turning it on costs ~$100–200/month.
+> Come back here only when users complain about first-request latency.
 
 Great idea for killing cold starts during working hours while paying nothing overnight.
 **RunPod has no built-in scheduler**, but its REST API lets you change the active-worker count,
