@@ -13,7 +13,7 @@
 1. **Build** the Docker image (model baked in, ~12–15 GB).
 2. **Push** it to Docker Hub.
 3. **Create a Network Volume** (so feedback audio survives worker restarts).
-4. **Create a Serverless endpoint** — type **Load Balancer**, 24 GB GPU, and set
+4. **Create a Serverless endpoint** — type **Load Balancer**, 16 GB GPU (testing), and set
    ⚠️ **Idle Timeout = 60 s** for testing (critical — see §8.1).
 5. **Set `PUBLIC_BASE_URL`** to the endpoint URL you just got, and restart workers.
 6. **Test** with curl + webhook.site, then hand the URL + key to the backend.
@@ -130,7 +130,7 @@ live on persistent storage.
 
 1. RunPod console → **Storage → Network Volumes → New**.
 2. Pick a **datacenter/region** (remember it — the endpoint must be in the **same** region).
-3. Size: **20 GB** is plenty (audio is small). Name it e.g. `quran-ars-vol`.
+3. Size: **10 GB** is plenty for testing (~$0.70/mo; audio is small). Name it e.g. `quran-ars-vol`.
 
 It will be mounted inside the worker at **`/runpod-volume`**. We point the app at it with
 `TEMP_STORAGE_DIR=/runpod-volume/temp_storage` (already supported by `main.py`).
