@@ -14,7 +14,7 @@
 2. **Push** it to Docker Hub.
 3. **Create a Network Volume** (so feedback audio survives worker restarts).
 4. **Create a Serverless endpoint** — type **Load Balancer**, 16 GB GPU (testing), and set
-   ⚠️ **Idle Timeout = 60 s** for testing (critical — see §8.1).
+   ⚠️ **Idle Timeout = 300 s** for a private beta (see §0.2, §8.1).
 5. **Set `PUBLIC_BASE_URL`** to the endpoint URL you just got, and restart workers.
 6. **Test** with curl + webhook.site, then hand the URL + key to the backend.
 
@@ -25,20 +25,44 @@
 If this is for **testing**, configure it to cost as close to nothing as possible. Pure
 scale-to-zero: you pay only for the seconds a request is actually being processed.
 
-| Setting | Cheapest value | Note |
+| Setting | Value | Note |
 |---|---|---|
 | **Active workers (`workersMin`)** | **0** | ⭐ the big one — nothing runs when idle |
-| **Max workers** | **1** | stops accidental parallel spend |
-| **Idle timeout** | **60 s** | the floor that still lets the webhook finish (§8.1) |
+| **Max workers** | **2** | 1 is fine for solo testing; 2 avoids queuing if two friends record at once |
+| **Idle timeout** | **300 s** | ⭐ see §0.2 — keeps the worker warm *across a testing session* |
 | **GPU** | **16 GB** tier | model needs ~6 GB. Prefer **A4000/A4500/RTX 4000 Ada**; avoid **T4** (no native bf16 → slow) |
 | **FlashBoot** | **on** | free, cuts cold-start time |
 | **Network volume** | **10 GB** (~$0.70/mo) | keeps feedback audio alive; skip only if you don't test `feedbackAudio` |
-| Scheduled warm hours (§11) | **don't bother** | that's a latency optimization for real traffic, not testing |
+| Scheduled warm hours (§11) | **don't bother** | for real production traffic, not a private beta |
 
-**Expected bill while testing:** a few hundred requests ≈ **$1–5/month**, plus ~$0.70 for the
-volume. Idle time is genuinely free at `workersMin = 0`.
+**Expected bill:** a private beta (a handful of users, a few dozen recitations/day) ≈
+**$5–15/month**, plus ~$0.70 for the volume. Idle time is genuinely free at `workersMin = 0`.
 
 > Delete the endpoint (and volume) when you're done testing to stop all charges.
+
+### 0.2 👥 If real users (the client's friends) will try the app — read this
+
+A private beta is **not** the same as developer testing: your testers will *feel* the cold start
+instead of knowing to retry. Two cheap adjustments make a big difference:
+
+**1. Set Idle Timeout to 300 s, not 60 s.** Testers arrive in *bursts* ("everyone try it tonight").
+With a 60 s timeout the worker dies between two friends and **each of them pays a 1–3 min cold
+start**. With 300 s the worker stays warm across the whole session, so only the *first* person
+waits. Cost of those idle tails at beta volume is only a few dollars a month — easily worth it.
+
+**2. Warm it manually before a scheduled demo.** If the client says "we're all testing at 8 pm",
+run this ~5 minutes before and turn it off after — it costs about **$1 per hour**:
+
+```bash
+./runpod_scale.sh 1     # before the demo — no cold start for anyone
+./runpod_scale.sh 0     # after — back to paying nothing
+```
+
+**⚠️ Requirement for the app/backend team:** because of cold starts, a result can take up to
+**~3 minutes** on the first request after a quiet period. The app **must show a "جاري التصحيح…"
+(processing) state and wait for the webhook** — it must not assume a result within 30 s or time
+out. The API is asynchronous precisely so this is possible; if the app handles the pending state
+properly, a cold start is merely *slow*, not *broken*.
 
 ---
 
@@ -152,8 +176,8 @@ Console → **Serverless → New Endpoint**.
 | **Container disk** | **25 GB** | must exceed the image size |
 | **Network volume** | `quran-ars-vol` (same region) | persistent feedback audio (§5) |
 | **Active workers** | **0** | scale to zero = pay only when used |
-| **Max workers** | **1** for testing | raise later for concurrency |
-| ⚠️ **Idle timeout** | **60 s** (testing) / 90 s (production) — never below 60 s | **critical** — see §8.1; also drives cost (§10) |
+| **Max workers** | **2** for a private beta | raise later for concurrency |
+| ⚠️ **Idle timeout** | **300 s** for a private beta (§0.2); 90 s for cost-only testing; never below 60 s | **critical** — see §8.1; also drives cost (§10) |
 | **Execution timeout** | leave default (≥ 5 min) | our request returns in <2 s |
 
 ### Environment variables
