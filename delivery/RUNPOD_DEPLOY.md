@@ -14,7 +14,7 @@
 2. **Push** it to Docker Hub.
 3. **Create a Network Volume** (so feedback audio survives worker restarts).
 4. **Create a Serverless endpoint** — type **Load Balancer**, 24 GB GPU, and set
-   ⚠️ **Idle Timeout ≥ 120 s** (critical — see §8.1).
+   ⚠️ **Idle Timeout = 90 s** (critical — see §8.1).
 5. **Set `PUBLIC_BASE_URL`** to the endpoint URL you just got, and restart workers.
 6. **Test** with curl + webhook.site, then hand the URL + key to the backend.
 
@@ -131,7 +131,7 @@ Console → **Serverless → New Endpoint**.
 | **Network volume** | `quran-ars-vol` (same region) | persistent feedback audio (§5) |
 | **Active workers** | **0** | scale to zero = pay only when used |
 | **Max workers** | **1–3** to start | raise later for concurrency |
-| ⚠️ **Idle timeout** | **≥ 120 seconds** (300 s is safer) | **critical** — see §8.1 |
+| ⚠️ **Idle timeout** | **90 seconds** (never below 60 s) | **critical** — see §8.1; also drives cost (§10) |
 | **Execution timeout** | leave default (≥ 5 min) | our request returns in <2 s |
 
 ### Environment variables
@@ -178,8 +178,11 @@ RunPod decides a worker is idle based on **HTTP requests**, and our HTTP request
 ~1 second. If **Idle Timeout is short (e.g. the 5 s default)**, RunPod can shut the worker down
 **mid-processing** → the webhook is never sent and the result is silently lost.
 
-**Fix: set Idle Timeout to ≥ 120 s (recommend 300 s).** Grading takes ~5–30 s, so this leaves a
-wide margin. This is the single most important setting on the page.
+**Fix: set Idle Timeout to 90 s** (never below 60 s). Grading takes ~5–30 s, so 90 s leaves a
+comfortable margin. This is the single most important setting on the page.
+
+Don't just set it huge: the idle tail is **billed** in scale-to-zero mode, so an over-long timeout
+(e.g. 300 s) can triple your bill on sparse traffic (§10). 90 s is the sweet spot.
 
 ### 8.2 Cold starts — the backend must retry
 With 0 active workers, the first request after idle must boot a container and load the 5 GB model:
@@ -269,11 +272,26 @@ ranges:
 **Cost per recitation** ≈ *active seconds* × *per-second rate*. Our grading takes roughly **5–15 s**
 of GPU time, so at ~$0.0003/s that's ≈ **$0.0015–0.005 per recitation**.
 
-| Monthly recitations | Rough cost (scale-to-zero) |
-|---|---|
-| 1,000 (testing) | **~$2–5** |
-| 10,000 (beta) | **~$15–50** |
-| 100,000 | **~$150–500** |
+⚠️ **You also pay for the idle-timeout tail.** In scale-to-zero mode a worker stays alive for your
+**Idle Timeout** after finishing a request, and that time **is billed**. So the real cost depends
+heavily on whether requests **cluster** (sharing one warm worker + one tail) or arrive **isolated**
+(each paying its own full tail). For 10,000 requests/month with a 120 s idle timeout:
+
+| Traffic pattern | Billed GPU time | ~Cost |
+|---|---|---|
+| **Clustered** (requests close together) | ~30–50 h | **~$25–50** |
+| **Spread out** (isolated requests) | ~360 h | **~$250** |
+
+**Lever:** the background task only needs ~10–30 s after the HTTP response, so **Idle Timeout = 90 s**
+is safe and roughly 3× cheaper than 300 s on sparse traffic. Don't go below ~60 s (§8.1).
+
+> **"But it's serverless — why does it cost anything when idle?"** Serverless means RunPod manages
+> the scaling, not that idle GPUs are free. You are billed for every second a worker is *running* —
+> which includes the idle-timeout tail, and (if you set `workersMin ≥ 1`) the entire time that
+> worker is held warm.
+
+**Trust the dashboard, not this table:** RunPod bills real GPU-seconds and shows them in the
+console. After a week of real traffic you'll know your actual number.
 
 Plus **network volume** ≈ $0.07/GB/month (20 GB ≈ **$1.40/mo**).
 
@@ -364,20 +382,24 @@ never cold during working hours.
 7 h/day × 30 days = **210 h/month**. On a 24 GB GPU at the **active** rate
 (~20–30 % cheaper than flex, roughly $0.00013–0.00027/s):
 
-| Strategy | Cost / month | Cold starts |
-|---|---|---|
-| Pure scale-to-zero (10k req/mo) | **~$15–50** | yes, after each idle gap |
-| **Warm 10:00–17:00 only** | **~$100–200** | **none during working hours** |
-| Active 24/7 | ~$340–710 | none ever |
+| Strategy | Billed GPU time | Cost / month | Cold starts |
+|---|---|---|---|
+| Scale-to-zero, **clustered** traffic | ~30–50 h | **~$25–50** | yes, after each gap |
+| Scale-to-zero, **spread-out** traffic | ~360 h | **~$250** | yes, after each gap |
+| **Warm 10:00–17:00 only** | 210 h | **~$100–200** | **none in working hours** |
+| Active 24/7 | 730 h | ~$340–710 | none ever |
 
 **The decision rule:**
 
-- **Low/sparse beta traffic** (a handful of requests per hour, long gaps) → **stay at
-  `workersMin = 0`**. You'd be paying ~$100–200/mo mostly to keep an *idle* GPU warm; better to let
-  the backend retry (§8.2). Cold starts only hit the first request after a gap.
-- **Steady daytime traffic** (requests arriving more often than your idle timeout, so a flex worker
-  would basically never sleep anyway) → **the schedule is cheaper *and* faster**, because you'd be
-  paying the higher *flex* rate for that same uptime regardless.
+- **Sparse traffic in bursts** (a few clusters per day, long quiet gaps) → **stay at
+  `workersMin = 0`**. Cold starts only hit the first request of each burst, and the backend
+  retries (§8.2).
+- **Requests trickling all day long** → this is the case people get wrong. Scale-to-zero pays a
+  full idle tail per isolated request *at the higher flex rate*, so **the warm schedule is often
+  both cheaper and faster**. Active workers bill ~20–30 % below flex.
+
+Note the counter-intuitive result: "serverless" is **not** automatically the cheapest option — it
+wins on *bursty* traffic and loses on *thin, constant* traffic.
 
 **My recommendation for today:** launch with `workersMin = 0`, watch real usage for a week, then
 turn on the schedule if first-request latency actually bothers users. The script is ready whenever
@@ -390,7 +412,7 @@ you want it — flipping it on is one cron entry.
 | Symptom | Cause / fix |
 |---|---|
 | Workers never become "ready"; 502s | Port mismatch. The endpoint's **Expose HTTP port** must be **8000** (or set env `PORT` to whatever you exposed). |
-| `/health` works but no webhook arrives | **Idle Timeout too short** (§8.1) — raise to ≥ 120 s. Or the worker can't reach `webhookUrl`. |
+| `/health` works but no webhook arrives | **Idle Timeout too short** (§8.1) — raise to 90 s. Or the worker can't reach `webhookUrl`. |
 | First request fails, later ones work | Normal **cold start** — implement retries (§8.2). |
 | `401 AUTH_FAILED` | Wrong header or value. Must be `X-AI-API-Key: <AI_API_KEY>`, exactly matching the endpoint env var. |
 | Feedback audio 404 after a while | `TEMP_STORAGE_DIR` not set to `/runpod-volume/temp_storage`, or no network volume attached (§5). |
