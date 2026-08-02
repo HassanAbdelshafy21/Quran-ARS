@@ -30,8 +30,9 @@ in the background, and POSTs the result to a **webhook** you provide.
   required** — do not switch to fp16.
 
 ## Environment variables (only two)
-- `AI_API_KEY` — a shared secret. Callers of `/api/evaluate` must send `Authorization: Bearer
-  <AI_API_KEY>`. Pick a strong value and give the same value to our app backend.
+- `AI_API_KEY` — a shared secret. Callers of `/api/evaluate` must send `X-AI-API-Key:
+  <AI_API_KEY>` (plain value, no `Bearer` prefix — the `Authorization` header is reserved for
+  RunPod Serverless's own gateway auth). Pick a strong value and give it to our app backend.
 - `PUBLIC_BASE_URL` — the public URL where **this service** is reachable (e.g.
   `https://ai.example.com`). It is used to build links to generated feedback audio, so it must be
   the externally-reachable address of this service.
@@ -54,7 +55,7 @@ Put a reverse proxy (Nginx) with TLS in front, forwarding 443 → 8000. Keep por
 **Request** — our app backend calls:
 ```http
 POST /api/evaluate
-Authorization: Bearer <AI_API_KEY>
+X-AI-API-Key: <AI_API_KEY>
 Content-Type: application/json
 
 {

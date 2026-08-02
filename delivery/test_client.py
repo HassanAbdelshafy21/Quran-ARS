@@ -6,7 +6,7 @@ Two modes:
   sync  : POST /grade_recitation with a LOCAL audio file (multipart). Simplest smoke test;
           no webhook needed. Prints score, per-word analysis, and the new tajweed/harakat feedback.
 
-  async : The REAL integration — POST /api/evaluate (JSON, Bearer auth). The service replies
+  async : The REAL integration — POST /api/evaluate (JSON, X-AI-API-Key header). The service replies
           instantly with a jobId, processes in the background, and POSTs the result to a
           webhookUrl. This script starts a tiny local webhook receiver, fires the request, waits
           for the callback, and prints the full `data` payload (incl. userRecitationDiacritized
@@ -127,7 +127,7 @@ def run_async(args):
         "webhookUrl": webhook_url,
         "webhookSecret": args.webhook_secret,
     }
-    headers = {"Authorization": f"Bearer {args.api_key}", "Content-Type": "application/json"}
+    headers = {"X-AI-API-Key": args.api_key, "Content-Type": "application/json"}
     print(f"POST {url}")
     try:
         r = requests.post(url, json=body, headers=headers, timeout=30)
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     ap.add_argument("--file", default="test_audio.ogg", help="(sync) local audio file")
     ap.add_argument("--text", default="بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ", help="(sync) expected ayah text")
     ap.add_argument("--audio-url", default=None, help="(async) PUBLIC url of the recording")
-    ap.add_argument("--api-key", default=os.environ.get("AI_API_KEY", ""), help="(async) Bearer AI_API_KEY")
+    ap.add_argument("--api-key", default=os.environ.get("AI_API_KEY", ""), help="(async) X-AI-API-Key value")
     ap.add_argument("--surah", type=int, default=None)
     ap.add_argument("--surah-name", default=None)
     ap.add_argument("--ayah", type=int, default=None, help="(sync) single ayah number")

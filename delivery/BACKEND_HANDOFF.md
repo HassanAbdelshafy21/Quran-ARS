@@ -19,6 +19,11 @@ from `AI-Integration-Spec-AR.md` exactly.
   recitation. The API contract, webhook shape, and 0–100 scoring are unchanged; two `data` fields
   were added (`userRecitationDiacritized`, `harakatErrors`). Requires a **CUDA GPU** (§7).
 - The async contract and 0–100 score conversion pass all acceptance checks (incl. **`webm`** audio).
+- **Deployment (private beta):** running on **RunPod Serverless**, not a fixed domain yet. Base URL
+  is the RunPod endpoint (`https://<ENDPOINT_ID>.api.runpod.ai`), given to you separately once
+  deployed — swap it in wherever this doc says `https://ai.yutlaquran.com`. Auth header is
+  `X-AI-API-Key`, not `Authorization` (see §3) — required because RunPod's own gateway auth uses
+  `Authorization` on the endpoint. Add retry-on-cold-start per the note in §3.
 
 ---
 
@@ -40,8 +45,11 @@ from `AI-Integration-Spec-AR.md` exactly.
 ```http
 POST /api/evaluate
 Content-Type: application/json
-Authorization: Bearer {AI_API_KEY}
+X-AI-API-Key: {AI_API_KEY}
 ```
+> ⚠️ **Changed from `Authorization: Bearer {AI_API_KEY}`.** The service now runs behind RunPod
+> Serverless, whose own gateway auth occupies the `Authorization` header — our app-level key moved
+> to `X-AI-API-Key` (plain value, no `Bearer` prefix) to avoid colliding with it.
 ```json
 {
   "audioUrl": "https://.../recording.webm",
@@ -60,7 +68,12 @@ Authorization: Bearer {AI_API_KEY}
 ```json
 { "status": "processing", "jobId": "8f14e45f-...", "estimatedTime": 30 }
 ```
-Bad/missing `Authorization` → `401` `{ "status":"error", "message":"Invalid API key", "code":"AUTH_FAILED" }`.
+Bad/missing `X-AI-API-Key` → `401` `{ "status":"error", "message":"Invalid API key", "code":"AUTH_FAILED" }`.
+
+> **Cold starts:** the service scales to zero when idle (RunPod Serverless). If a request lands
+> while a worker is spinning up, RunPod's gateway can return an error instead of queuing it —
+> **retry 3× with a 5–10s delay** on connection failures / non-2xx from the base URL before
+> treating it as a real error. Once a worker is warm, subsequent requests are the normal <2s.
 
 ### Webhook — success
 `POST {webhookUrl}` with `Authorization: Bearer {webhookSecret}`. **Exactly 5 top-level keys on success**
@@ -148,7 +161,13 @@ On the webhook POST: **3 attempts, backoff 1s→2s→4s, on `5xx`/timeout only**
 ```bash
 AI_API_KEY=<the shared secret you send us>       # required; requests without it get 401
 PUBLIC_BASE_URL=https://ai.yutlaquran.com        # required; makes audio URLs absolute
+TEMP_STORAGE_DIR=/runpod-volume/temp_storage     # RunPod only; PERSISTENT store for feedback audio
 ```
+
+> **`TEMP_STORAGE_DIR` matters on RunPod Serverless.** `feedback_*.mp3` must survive 30 days (§8),
+> but a serverless container's own disk is wiped when the worker scales to zero and is not shared
+> between workers. Point this at an attached **network volume** or `feedbackAudio` URLs will 404.
+> Leave it unset for local/docker-compose runs (defaults to `./temp_storage`).
 
 ---
 
@@ -232,7 +251,7 @@ async def hook(r: Request):
 ```
 ```bash
 curl -X POST http://localhost:8000/api/evaluate \
-  -H "Authorization: Bearer $AI_API_KEY" -H "Content-Type: application/json" \
+  -H "X-AI-API-Key: $AI_API_KEY" -H "Content-Type: application/json" \
   -d '{"audioUrl":"https://.../sample.webm","surahNumber":1,"fromAyah":1,"toAyah":7,
        "userId":1,"recitationId":1,
        "webhookUrl":"http://localhost:3777/api/v1/recitations/webhook/ai-evaluation",
@@ -244,8 +263,8 @@ curl -X POST http://localhost:8000/api/evaluate \
 ## 11. Acceptance checklist (§8) — all passing
 
 ```
-✅ /api/evaluate returns < 2s with { status:"processing", jobId }
-✅ Missing/invalid Authorization → 401
+✅ /api/evaluate returns < 2s with { status:"processing", jobId } (once a worker is warm)
+✅ Missing/invalid X-AI-API-Key → 401
 ✅ Downloads audio from audioUrl
 ✅ Works with webm (not only MP3)
 ✅ get_ayah_range(1,1,7) returns full Al-Fatiha

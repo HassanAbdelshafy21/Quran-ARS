@@ -57,11 +57,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AI_API_KEY = os.getenv("AI_API_KEY", "")
 
 
-def _valid_api_key(authorization: str | None) -> bool:
-    """Constant-time check of the Bearer key. Empty AI_API_KEY never authenticates."""
-    if not AI_API_KEY or not authorization:
+def _valid_api_key(api_key: str | None) -> bool:
+    """Constant-time check of the shared secret. Empty AI_API_KEY never authenticates.
+
+    Sent as X-AI-API-Key (not Authorization) because RunPod Serverless's own gateway
+    auth occupies the Authorization header on the load-balancer endpoint.
+    """
+    if not AI_API_KEY or not api_key:
         return False
-    return hmac.compare_digest(authorization, f"Bearer {AI_API_KEY}")
+    return hmac.compare_digest(api_key, AI_API_KEY)
 
 
 # Public, absolute base URL for audio links. localhost is useless to a phone. (§6.4)
@@ -74,8 +78,12 @@ grader = None
 segmenter = None
 quran_db = None
 
-# Directories
-TEMP_STORAGE = os.path.join(BASE_DIR, "temp_storage")
+# Directories.
+# TEMP_STORAGE_DIR must point at PERSISTENT storage: feedback_*.mp3 is served at /audio/ and the
+# backend references those URLs for 30 days. On RunPod Serverless the container disk is ephemeral
+# (wiped on scale-to-zero) and not shared between workers, so set this to the network volume:
+#   TEMP_STORAGE_DIR=/runpod-volume/temp_storage
+TEMP_STORAGE = os.getenv("TEMP_STORAGE_DIR") or os.path.join(BASE_DIR, "temp_storage")
 os.makedirs(TEMP_STORAGE, exist_ok=True)
 
 # Mount Static Files for Audio Feedback
@@ -278,10 +286,10 @@ class EvaluateRequest(BaseModel):
 async def evaluate_async(
     req: EvaluateRequest,
     background_tasks: BackgroundTasks,
-    authorization: str = Header(None),
+    x_ai_api_key: str = Header(None, alias="X-AI-API-Key"),
 ):
     # Auth (§3.3)
-    if not _valid_api_key(authorization):
+    if not _valid_api_key(x_ai_api_key):
         return JSONResponse(
             status_code=401,
             content={"status": "error", "message": "Invalid API key", "code": "AUTH_FAILED"},
@@ -474,5 +482,11 @@ async def health():
     }
 
 
+@app.get("/ping", summary="RunPod Serverless worker health check")
+async def ping():
+    return {"status": "healthy" if model is not None else "initializing"}
+
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    port = int(os.getenv("PORT", 8000))  # RunPod Serverless (load balancer) injects PORT
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

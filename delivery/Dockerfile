@@ -39,9 +39,9 @@ RUN mkdir -p temp_storage
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check (PORT is injected by RunPod Serverless; defaults to 8000 for docker compose)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD sh -c "curl -f http://localhost:${PORT:-8000}/health || exit 1"
 
 # Run
 CMD ["python3", "main.py"]

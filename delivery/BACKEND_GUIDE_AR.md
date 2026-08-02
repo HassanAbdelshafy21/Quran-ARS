@@ -23,7 +23,7 @@
 هذا هو **السرّ المشترك الوحيد** بين الطرفين:
 
 - الخدمة تُشغَّل بقيمة `AI_API_KEY`.
-- **كل** طلب إلى `/api/evaluate` يجب أن يحمل الترويسة: `Authorization: Bearer <AI_API_KEY>` بنفس القيمة.
+- **كل** طلب إلى `/api/evaluate` يجب أن يحمل الترويسة: `X-AI-API-Key: <AI_API_KEY>` بنفس القيمة (القيمة مباشرة، بدون `Bearer`). ترويسة `Authorization` محجوزة لبوابة RunPod Serverless نفسها.
 - إذا اختلفت القيمتان ← يكون الرد **401** (`AUTH_FAILED`).
 
 > في اختبار كولاب (Colab) القيمة هي `test-key-123`. في الإنتاج تختارون أنتم قيمة قوية وتستخدمونها في الطرفين.
@@ -43,7 +43,7 @@
 
 ```bash
 curl -X POST https://xxxx.trycloudflare.com/api/evaluate \
-  -H "Authorization: Bearer test-key-123" \
+  -H "X-AI-API-Key: test-key-123" \
   -H "Content-Type: application/json" \
   -d '{
     "audioUrl": "https://everyayah.com/data/Husary_128kbps/112002.mp3",
@@ -69,13 +69,13 @@ curl -X POST https://xxxx.trycloudflare.com/api/evaluate \
 - **`webhookUrl`** يجب أن يكون **عامّاً** يستطيع السيرفر الوصول إليه:
   - للتجربة: استخدموا `https://webhook.site`.
   - للربط الحقيقي: ضعوا نقطة نهاية الباك-اند الحقيقية. وإن كانت على جهاز محلي (localhost)، استخدموا نفقاً مثل **ngrok**.
-- **الترويسة**: `Authorization: Bearer <AI_API_KEY>` بنفس قيمة مفتاح الخدمة.
+- **الترويسة**: `X-AI-API-Key: <AI_API_KEY>` بنفس قيمة مفتاح الخدمة.
 
 ---
 
 ## ٥) شكل الطلب — `POST /api/evaluate`
 
-الترويسات: `Authorization: Bearer <AI_API_KEY>` و `Content-Type: application/json`.
+الترويسات: `X-AI-API-Key: <AI_API_KEY>` و `Content-Type: application/json`.
 
 الحقول (JSON):
 
