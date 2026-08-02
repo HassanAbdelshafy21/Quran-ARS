@@ -102,7 +102,7 @@ Full, self-contained instructions: **[delivery/AGENT_DEPLOY_PROMPT.md](delivery/
 
 ## 🔌 The API (for the backend)
 
-`POST /api/evaluate` (header `Authorization: Bearer <AI_API_KEY>`) with `audioUrl`, `surahNumber`,
+`POST /api/evaluate` (header `X-AI-API-Key: <AI_API_KEY>`) with `audioUrl`, `surahNumber`,
 `fromAyah`, `toAyah`, `webhookUrl`, `webhookSecret`, … → returns `{ "status":"processing", "jobId" }`
 immediately, then **POSTs the result to your `webhookUrl`** (score, `userRecitationDiacritized`,
 `harakatErrors`, per-word detail). The **only value that must match** on both sides is `AI_API_KEY`.
