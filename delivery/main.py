@@ -4,8 +4,9 @@ Quran ASR Kids API — Self-Contained Delivery Server
 Run: python main.py
 Docs: http://localhost:8000/docs
 """
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, BackgroundTasks, Header
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, BackgroundTasks, Header, Response
 from fastapi.responses import JSONResponse
+import threading
 import uvicorn
 import shutil
 import os
@@ -39,7 +40,11 @@ log = logging.getLogger("quran-asr")
 # Initialize App
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_resources()   # runs once at startup (defined below)
+    # Load the model in a background thread so the HTTP server starts listening
+    # immediately. RunPod's load balancer must be able to poll /ping during the
+    # 1-3 min model load (it answers 204 = initializing until the model is ready);
+    # a blocking startup would leave the port closed and look like a dead worker.
+    threading.Thread(target=load_resources, name="load_resources", daemon=True).start()
     yield
 
 
@@ -484,7 +489,15 @@ async def health():
 
 @app.get("/ping", summary="RunPod Serverless worker health check")
 async def ping():
-    return {"status": "healthy" if model is not None else "initializing"}
+    """RunPod load-balancer contract: 200 = healthy (send traffic), 204 = still
+    initializing (hold traffic), anything else = unhealthy (drop the worker).
+
+    Returning 200 while the model is still loading would make RunPod route real
+    requests to a worker that can only answer 503, so we return 204 until ready.
+    """
+    if model is None:
+        return Response(status_code=204)
+    return {"status": "healthy"}
 
 
 if __name__ == "__main__":

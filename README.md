@@ -98,6 +98,11 @@ curl http://localhost:8000/health     # -> {"status":"ok","model_loaded":true}
 ```
 Full, self-contained instructions: **[delivery/AGENT_DEPLOY_PROMPT.md](delivery/AGENT_DEPLOY_PROMPT.md)**.
 
+### Option C — RunPod Serverless (scale-to-zero, pay per second)
+Step-by-step: **[delivery/RUNPOD_DEPLOY.md](delivery/RUNPOD_DEPLOY.md)** — build → push → network
+volume → Load Balancer endpoint → verify. The app already implements RunPod's `/ping` health
+contract (204 while loading, 200 when ready) and reads the injected `PORT`.
+
 ---
 
 ## 🔌 The API (for the backend)
