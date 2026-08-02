@@ -287,7 +287,105 @@ Plus **network volume** ≈ $0.07/GB/month (20 GB ≈ **$1.40/mo**).
 
 ---
 
-## 11. Troubleshooting
+## 11. Scheduled warm hours (1 active worker 10:00–17:00, 0 otherwise)
+
+Great idea for killing cold starts during working hours while paying nothing overnight.
+**RunPod has no built-in scheduler**, but its REST API lets you change the active-worker count,
+so you drive it from **cron**. ([RunPod recommends exactly this](https://www.runpod.io/articles/guides/ai-on-a-schedule).)
+
+The field you change is **`workersMin`** — that is the console's **"Active workers"** setting:
+
+- `workersMin = 1` → one worker stays warm permanently → **no cold starts**, billed at the
+  cheaper **active** rate.
+- `workersMin = 0` → scale to zero → pay only per request, but the first request after a quiet
+  period pays the 1–3 min cold start.
+
+### 11.1 The script (included: `runpod_scale.sh`)
+
+```bash
+export RUNPOD_API_KEY=<from runpod.io → Settings → API Keys>
+export RUNPOD_ENDPOINT_ID=<your endpoint id>
+
+./runpod_scale.sh 1    # warm  (start of day)
+./runpod_scale.sh 0    # cold  (end of day)
+```
+
+It calls `POST https://rest.runpod.io/v1/endpoints/{id}/update` with `{"workersMin": N}`
+(partial updates are allowed, so nothing else is touched).
+
+### 11.2 Option A — cron on a machine you control
+
+On any always-on Linux box (your backend server, a small VPS), `crontab -e`:
+
+```cron
+# times are in the SERVER's timezone — check with:  timedatectl
+0 10 * * *  cd /path/to/delivery && RUNPOD_API_KEY=xxx RUNPOD_ENDPOINT_ID=yyy ./runpod_scale.sh 1 >> /var/log/runpod_scale.log 2>&1
+0 17 * * *  cd /path/to/delivery && RUNPOD_API_KEY=xxx RUNPOD_ENDPOINT_ID=yyy ./runpod_scale.sh 0 >> /var/log/runpod_scale.log 2>&1
+```
+
+⚠️ **Timezone**: cron uses the machine's local time. If the server runs UTC and you want Cairo
+hours, convert (Cairo is UTC+2 in winter, **UTC+3 in summer**). Safest is to set the box to
+`Africa/Cairo` (`sudo timedatectl set-timezone Africa/Cairo`) so the schedule follows DST by itself.
+
+### 11.3 Option B — GitHub Actions (no server needed) ⭐
+
+Since the repo is on GitHub, you can schedule it for free. Add
+`.github/workflows/runpod-schedule.yml`:
+
+```yaml
+name: RunPod warm schedule
+on:
+  schedule:
+    - cron: "0 7 * * *"    # 07:00 UTC -> 10:00 Cairo (summer) / 09:00 (winter)
+    - cron: "0 15 * * *"   # 15:00 UTC -> 18:00 Cairo (summer) / 17:00 (winter)
+  workflow_dispatch:        # lets you trigger it manually too
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set active workers
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+        run: |
+          # first cron of the day warms up, second cools down
+          if [ "$(date -u +%H)" -lt 12 ]; then N=1; else N=0; fi
+          chmod +x delivery/runpod_scale.sh && delivery/runpod_scale.sh "$N"
+```
+
+Add `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID` under **repo → Settings → Secrets and variables →
+Actions**. Note: GitHub cron is **UTC only** and can fire **5–15 min late** under load — fine here.
+The UTC times above deliberately err on the side of warming *earlier* and cooling *later* so you're
+never cold during working hours.
+
+### 11.4 Is it actually worth it? (honest math)
+
+7 h/day × 30 days = **210 h/month**. On a 24 GB GPU at the **active** rate
+(~20–30 % cheaper than flex, roughly $0.00013–0.00027/s):
+
+| Strategy | Cost / month | Cold starts |
+|---|---|---|
+| Pure scale-to-zero (10k req/mo) | **~$15–50** | yes, after each idle gap |
+| **Warm 10:00–17:00 only** | **~$100–200** | **none during working hours** |
+| Active 24/7 | ~$340–710 | none ever |
+
+**The decision rule:**
+
+- **Low/sparse beta traffic** (a handful of requests per hour, long gaps) → **stay at
+  `workersMin = 0`**. You'd be paying ~$100–200/mo mostly to keep an *idle* GPU warm; better to let
+  the backend retry (§8.2). Cold starts only hit the first request after a gap.
+- **Steady daytime traffic** (requests arriving more often than your idle timeout, so a flex worker
+  would basically never sleep anyway) → **the schedule is cheaper *and* faster**, because you'd be
+  paying the higher *flex* rate for that same uptime regardless.
+
+**My recommendation for today:** launch with `workersMin = 0`, watch real usage for a week, then
+turn on the schedule if first-request latency actually bothers users. The script is ready whenever
+you want it — flipping it on is one cron entry.
+
+---
+
+## 12. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -305,7 +403,7 @@ Plus **network volume** ≈ $0.07/GB/month (20 GB ≈ **$1.40/mo**).
 
 ---
 
-## 12. Updating the service later
+## 13. Updating the service later
 
 ```bash
 cd delivery
@@ -319,7 +417,7 @@ endpoint back at the previous tag.
 
 ---
 
-## 13. Hand-off to the backend team
+## 14. Hand-off to the backend team
 
 Give them exactly three things:
 
