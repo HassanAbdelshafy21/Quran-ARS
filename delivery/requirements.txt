@@ -36,3 +36,7 @@ edge-tts>=6.1.9
 # --- Utilities ---
 requests>=2.31.0
 moviepy>=1.0.3
+
+# --- Object storage (optional: Cloudflare R2 / S3 for feedback audio) ---
+# Only needed when S3_* env vars are set; the service falls back to local disk otherwise.
+boto3>=1.34.0

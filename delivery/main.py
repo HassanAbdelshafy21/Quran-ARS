@@ -33,6 +33,7 @@ from core.namaa_model import NamaaModel
 from core.harakat_grader import grade_harakat
 from core.tts import generate_feedback_audio
 from core.quran_db import QuranDB
+from core import storage
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("quran-asr")
@@ -181,6 +182,11 @@ async def run_grading(audio_path, target_ayah, surah_num=None, ayah_num=None, ui
     mistakes = grade_result['mistakes'] if grade_result['mistakes'] else []
     await generate_feedback_audio(mistakes, feedback_path)
 
+    # 4b. Upload to object storage (R2/S3) when configured. Required on ephemeral serverless
+    # containers, and it lets the app fetch audio from the CDN instead of waking a GPU worker.
+    # Returns None when storage is disabled or the upload fails -> callers fall back to /audio/.
+    feedback_url = await asyncio.to_thread(storage.upload, feedback_path, feedback_filename)
+
     # 5. Reference audio (Sheikh Minshawi) — only when the child fails
     ref_url = None
     if surah_num and not grade_result['passed']:
@@ -204,6 +210,7 @@ async def run_grading(audio_path, target_ayah, surah_num=None, ayah_num=None, ui
         "mistakes": grade_result['mistakes'],
         "words": words_detail,
         "feedback_filename": feedback_filename,
+        "feedback_url": feedback_url,        # CDN URL when object storage is on, else None
         "reference_audio": ref_url,
         "segments_processed": len(segments),
     }
@@ -255,7 +262,7 @@ async def grade_recitation(
             "harakat_checked": r["harakat_checked"],
             "harakat_errors": r["harakat_errors"],
             "words": r["words"],
-            "feedback_audio": f"{base_url}/audio/{r['feedback_filename']}",
+            "feedback_audio": r["feedback_url"] or f"{base_url}/audio/{r['feedback_filename']}",
             "reference_audio": r["reference_audio"],
             "segments_processed": r["segments_processed"],
         }
@@ -389,7 +396,7 @@ async def _process_and_callback(job_id: str, req: EvaluateRequest):
                     "deletion": sum(1 for w in words if w["error_type"] == "deletion"),
                     "insertion": sum(1 for w in words if w["error_type"] == "insertion"),
                 },
-                "feedbackAudio": f"{PUBLIC_BASE_URL}/audio/{r['feedback_filename']}",
+                "feedbackAudio": r["feedback_url"] or f"{PUBLIC_BASE_URL}/audio/{r['feedback_filename']}",
                 "referenceAudio": r["reference_audio"],
                 "segmentsProcessed": r["segments_processed"],
                 "requestId": job_id,
