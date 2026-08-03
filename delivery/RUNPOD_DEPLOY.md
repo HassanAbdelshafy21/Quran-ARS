@@ -66,6 +66,73 @@ properly, a cold start is merely *slow*, not *broken*.
 
 ---
 
+## 0.3 🌐 Domain & integration requirements from the backend team
+
+The final domain is **`quranyutla.com`** (not `yutlaquran.com`, which appeared in the old spec).
+Their four requirements, and where each stands:
+
+| # | Requirement | Status |
+|---|---|---|
+| 1 | `PUBLIC_BASE_URL=https://ai.quranyutla.com` | ⚠️ needs a proxy on RunPod — see §0.3.1 |
+| 2 | Point `ai.quranyutla.com` at the service + SSL | ⚠️ same — §0.3.1 |
+| 3 | Take `webhookUrl` from the **request body**, never hardcoded | ✅ **already correct** |
+| 4 | Server must reach `https://cdn.quranyutla.com/...` to download audio | ✅ works — §0.3.2 |
+
+**On #3 (their main worry) — already satisfied.** `webhookUrl` is a required field of the request
+model and the service calls exactly what you send: `_send_webhook(req.webhookUrl, ...)`. There is
+**no hardcoded domain anywhere in the service code** — the old domain only ever appeared in
+documentation examples. Every request may use a different `webhookUrl`.
+
+### 0.3.1 ⚠️ Custom domain + RunPod Serverless — read before promising `ai.quranyutla.com`
+
+RunPod Serverless gives you a fixed URL: **`https://<ENDPOINT_ID>.api.runpod.ai`**. You **cannot
+point `ai.quranyutla.com` straight at it with valid SSL** — RunPod serves the certificate for
+`*.api.runpod.ai`, so a bare DNS record to that host fails TLS validation. Three options:
+
+**Option A — use the RunPod URL for the beta (recommended now).**
+Set `PUBLIC_BASE_URL=https://<ENDPOINT_ID>.api.runpod.ai` and give the backend that URL. Zero
+extra cost/infra. Add the branded domain later when moving to a dedicated GPU server.
+
+**Option B — Cloudflare Worker proxy (branded domain, ~free).**
+`quranyutla.com` on Cloudflare → a small Worker on the route `ai.quranyutla.com/*` that forwards
+to the RunPod endpoint. Cloudflare terminates SSL for your domain; the Worker calls RunPod over
+its own valid HTTPS. Then `PUBLIC_BASE_URL=https://ai.quranyutla.com`. *(A plain proxied CNAME is
+unreliable here because of SNI/host-header mismatch — use a Worker, not just a DNS record.)*
+
+**Option C — tiny reverse-proxy VPS (~$5/mo).**
+Nginx + Let's Encrypt for `ai.quranyutla.com`, `proxy_pass` → the RunPod endpoint. The most
+conventional and predictable, at the cost of one small always-on box.
+
+> **On a normal (non-serverless) GPU server**, requirement #1/#2 is trivial: point DNS at the
+> server, run Nginx + certbot, set `PUBLIC_BASE_URL=https://ai.quranyutla.com`. The complication
+> exists *only* because serverless endpoints live on the provider's domain.
+
+### 0.3.2 CDN audio downloads (`cdn.quranyutla.com`)
+The worker downloads `audioUrl` over the public internet; RunPod allows outbound traffic, so this
+works with no extra configuration. Two things to confirm with the backend:
+
+- the CDN objects must be **publicly readable** (or use pre-signed URLs) — RunPod worker IPs are
+  **dynamic**, so an IP allow-list will not work;
+- URLs must be reachable from outside your VPC/network (test with `curl -I <audioUrl>`).
+
+### 0.3.3 ⚠️ Feedback audio on serverless (their separate point — valid)
+They're right: on serverless the container disk is wiped, so `feedback_*.mp3` written to a local
+`temp_storage/` would disappear. Two answers:
+
+- **On RunPod (what we're doing now):** attach the **Network Volume** and set
+  `TEMP_STORAGE_DIR=/runpod-volume/temp_storage` (§5/§6). Files then persist across worker
+  restarts **with no code change**. ✅
+- **If you later move to Modal / any provider without a shared volume:** the robust fix is to
+  **upload `feedback_*.mp3` to object storage (S3 / Cloudflare R2 / Spaces)** and return that
+  public URL in `feedbackAudio`. That is a **code change** (not yet implemented) — a small one in
+  `run_grading()` where the file is written. Tell us before that migration and we'll add it.
+
+> Also remember the trade-off in §8.3: while workers are scaled to zero, fetching a
+> `feedbackAudio` URL served *by the endpoint* wakes a worker (slow). Object storage removes that
+> problem too, which is a second good reason to move to it for production.
+
+---
+
 ## 1. Why "Load Balancer" and not the normal queue endpoint
 
 RunPod Serverless has two endpoint types:
@@ -186,7 +253,7 @@ Console → **Serverless → New Endpoint**.
 |---|---|
 | `AI_API_KEY` | your strong secret (from §2) |
 | `TEMP_STORAGE_DIR` | `/runpod-volume/temp_storage` |
-| `PUBLIC_BASE_URL` | *leave blank for now* — filled in Step 5 |
+| `PUBLIC_BASE_URL` | *leave blank for now* — filled in Step 5 (RunPod URL, or `https://ai.quranyutla.com` if you add the §0.3.1 proxy) |
 | `HF_HUB_OFFLINE` | `1` (model is baked in; avoids runtime downloads) |
 
 > If you used the "don't bake the model" variant (§3), **omit `HF_HUB_OFFLINE`** and add
@@ -210,6 +277,8 @@ reachable by the mobile app. So:
 1. Copy the endpoint URL.
 2. Edit the endpoint → **Environment variables** → set
    `PUBLIC_BASE_URL = https://<ENDPOINT_ID>.api.runpod.ai`
+   *(or `https://ai.quranyutla.com` **only if** you set up the proxy in §0.3.1 — it must be a URL
+   the mobile app can actually fetch `feedbackAudio` from)*
 3. **Save** — RunPod will restart the workers with the new value.
 
 ---
