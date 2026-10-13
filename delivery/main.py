@@ -180,12 +180,20 @@ async def run_grading(audio_path, target_ayah, surah_num=None, ayah_num=None, ui
     feedback_filename = f"feedback_{uid}.mp3"
     feedback_path = os.path.join(TEMP_STORAGE, feedback_filename)
     mistakes = grade_result['mistakes'] if grade_result['mistakes'] else []
-    await generate_feedback_audio(mistakes, feedback_path)
+    # Non-fatal: edge-tts depends on Microsoft's free endpoint, which can reject requests (403).
+    # A missing voice clip must not throw away the grade — feedback audio is just omitted.
+    try:
+        await generate_feedback_audio(mistakes, feedback_path)
+    except Exception as e:
+        print(f"TTS feedback failed (non-critical): {e}")
+        feedback_filename = None
 
     # 4b. Upload to object storage (R2/S3) when configured. Required on ephemeral serverless
     # containers, and it lets the app fetch audio from the CDN instead of waking a GPU worker.
     # Returns None when storage is disabled or the upload fails -> callers fall back to /audio/.
-    feedback_url = await asyncio.to_thread(storage.upload, feedback_path, feedback_filename)
+    feedback_url = None
+    if feedback_filename:
+        feedback_url = await asyncio.to_thread(storage.upload, feedback_path, feedback_filename)
 
     # 5. Reference audio (Sheikh Minshawi) — only when the child fails
     ref_url = None
@@ -262,7 +270,7 @@ async def grade_recitation(
             "harakat_checked": r["harakat_checked"],
             "harakat_errors": r["harakat_errors"],
             "words": r["words"],
-            "feedback_audio": r["feedback_url"] or f"{base_url}/audio/{r['feedback_filename']}",
+            "feedback_audio": r["feedback_url"] or (f"{base_url}/audio/{r['feedback_filename']}" if r["feedback_filename"] else None),
             "reference_audio": r["reference_audio"],
             "segments_processed": r["segments_processed"],
         }
@@ -396,7 +404,7 @@ async def _process_and_callback(job_id: str, req: EvaluateRequest):
                     "deletion": sum(1 for w in words if w["error_type"] == "deletion"),
                     "insertion": sum(1 for w in words if w["error_type"] == "insertion"),
                 },
-                "feedbackAudio": r["feedback_url"] or f"{PUBLIC_BASE_URL}/audio/{r['feedback_filename']}",
+                "feedbackAudio": r["feedback_url"] or (f"{PUBLIC_BASE_URL}/audio/{r['feedback_filename']}" if r["feedback_filename"] else None),
                 "referenceAudio": r["reference_audio"],
                 "segmentsProcessed": r["segments_processed"],
                 "requestId": job_id,

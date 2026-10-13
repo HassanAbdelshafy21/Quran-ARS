@@ -129,6 +129,8 @@ Bad/missing `X-AI-API-Key` → `401` `{ "status":"error", "message":"Invalid API
 > - `harakatErrors[]` — per word where the **vowel** differed: `word`, `expectedWord`, and
 >   `details[]` of `{ letter, got, expected }` (e.g. said *fatha*, expected *damma*). Empty = clean.
 > - `words[].timestampStart/End` are `null` (the model does not emit word timestamps).
+> - `feedbackAudio` can be `null` if the spoken-feedback clip couldn't be generated (the free
+>   TTS service is unavailable). The grade is still complete — just hide the play button.
 
 ### Webhook — error
 ```json
