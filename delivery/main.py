@@ -74,6 +74,16 @@ def _valid_api_key(api_key: str | None) -> bool:
     return hmac.compare_digest(api_key, AI_API_KEY)
 
 
+def _key_from_request(x_ai_api_key: str | None, authorization: str | None) -> str | None:
+    """X-AI-API-Key, or the legacy `Authorization: Bearer <key>` that existing callers
+    (the production backend) still send — accepting both keeps old clients working."""
+    if x_ai_api_key:
+        return x_ai_api_key
+    if authorization and authorization.startswith("Bearer "):
+        return authorization[len("Bearer "):]
+    return None
+
+
 # Public, absolute base URL for audio links. localhost is useless to a phone. (§6.4)
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
 MODEL_VERSION = "namaa-cohere-speech-tashkeel-2b"
@@ -307,9 +317,10 @@ async def evaluate_async(
     req: EvaluateRequest,
     background_tasks: BackgroundTasks,
     x_ai_api_key: str = Header(None, alias="X-AI-API-Key"),
+    authorization: str = Header(None),
 ):
     # Auth (§3.3)
-    if not _valid_api_key(x_ai_api_key):
+    if not _valid_api_key(_key_from_request(x_ai_api_key, authorization)):
         return JSONResponse(
             status_code=401,
             content={"status": "error", "message": "Invalid API key", "code": "AUTH_FAILED"},
