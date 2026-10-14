@@ -14,7 +14,7 @@ Deploy (logged in to Modal as the yutlaquran workspace), from inside delivery/:
 import modal
 
 # ---- Must match the live app (Modal dashboard: Apps -> quran-asr -> fastapi_app, and Secrets) ----
-SECRET_NAME = "quran-asr"   # the secret the live app uses (holds AI_API_KEY etc.)
+SECRET_NAME = "quran-asr-secrets"   # the secret the live app uses (holds AI_API_KEY etc.)
 GPU = "T4"                  # same GPU as the live fastapi_app function
 # --------------------------------------------------------------------------------------------------
 
